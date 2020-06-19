@@ -137,6 +137,13 @@ typedef struct Inflater {
     unsigned _seq_dist;
     unsigned _seq_len;
     
+    /* HIDDEN: code lengths reader */
+    unsigned command;
+    unsigned code;
+    unsigned length;
+    unsigned repetitions;
+
+    
     PDZip::ReversedHuffmanDecoder* _frontDecoder;     ///< The base decoder used to decode the next 2 decoders (it's crazy!)
     PDZip::ReversedHuffmanDecoder* _literalDecoder;   ///< The literal+length huffman decoder
     PDZip::ReversedHuffmanDecoder* _distanceDecoder;  ///< The distance huffman decoder

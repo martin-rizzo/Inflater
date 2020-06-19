@@ -46,7 +46,7 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
 
 //======================================================================================================================
-#   pragma mark - BIT STREAM READING
+#   pragma mark - READING BIT STREAM
 
 /** Loads the next byte (8 bits) from the input stream to the bitbuffer */
 static InfBool InfBS_LoadNextByte(Inflater* infptr) {
@@ -67,7 +67,7 @@ static InfBool InfBS_ReadBits(Inflater* infptr, unsigned* dest, int numberOfBits
 }
 
 /** Reads a sequence of huffman encoded bits from the buffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
-static InfBool InfBS_ReadHuffmanBits(Inflater* infptr, unsigned* dest, const PDZip::ReversedHuffmanDecoder* decoder) {
+static InfBool InfBS_ReadCompressedBits(Inflater* infptr, unsigned* dest, const PDZip::ReversedHuffmanDecoder* decoder) {
     assert( infptr!=NULL && dest!=NULL && decoder!=NULL && decoder->isLoaded() );
     PDZip::ReversedHuffmanDecoder::Data data;
 
@@ -145,6 +145,102 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 
 
 //======================================================================================================================
+#   pragma mark - READING CODE LENGTHS
+
+static PDZip::CodeLengths _codeLengths;
+
+
+static void InfCL_Begin(Inflater* infptr) { inf.command = inf.length = inf.repetitions = inf.code = 0; _codeLengths.open(); }
+
+static void InfCL_BeginAndContinue(Inflater* infptr) { inf.code = 0; _codeLengths.open(); }
+
+static void InfCL_End(Inflater* infptr) { _codeLengths.close(); }
+
+static InfBool InfCL_ReadCodes(Inflater* infptr, unsigned numberOfCodes) {
+    assert( _codeLengths.isOpen() );
+    assert( numberOfCodes>0 );
+    assert( infptr!=NULL );
+    static const unsigned MaximumNumberOfCodes = 19;
+    static const unsigned order[MaximumNumberOfCodes] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
+    unsigned char* const internalArray = _codeLengths.getInternalArray(MaximumNumberOfCodes);
+    
+    const unsigned end = (numberOfCodes<MaximumNumberOfCodes) ? numberOfCodes : MaximumNumberOfCodes;
+    while (inf.code<end) {
+        unsigned length;
+        if ( !InfBS_ReadBits(infptr,&length,3) ) { return Inf_FALSE; }
+        internalArray[order[inf.code]] = length;
+        ++inf.code;
+    }
+    while (inf.code<MaximumNumberOfCodes) { internalArray[order[inf.code++]] = 0; }
+    _codeLengths.addFromInternalArray(internalArray,MaximumNumberOfCodes);
+    return Inf_TRUE;
+}
+
+static InfBool InfCL_ReadCompressedCodes(Inflater* infptr, unsigned numberOfCodes, const PDZip::ReversedHuffmanDecoder* decoder) {
+    assert( _codeLengths.isOpen() );
+    assert( numberOfCodes>0 );
+    assert( infptr!=NULL );
+    static const unsigned MaxValidLength = 15; // < the maximum length that can be read
+    enum Command {
+        Command_ReadNext            = 0,  // < load next command
+        Command_CopyPreviousLength  = 16, // < repeat the previous length
+        Command_RepeatZeroLength_3  = 17, // < repeat zero length (3 or more times)
+        Command_RepeatZeroLength_11 = 18  // < repeat zero length (11 or more times)
+    };
+    unsigned value = 0;
+
+    // IMPORTANT: add any repetition that is pending from a previous load (ex: literals-table > distance-table)
+    while (inf.code<numberOfCodes && inf.repetitions>0) {
+        _codeLengths.add(inf.code++,inf.length); --inf.repetitions;
+    }
+    
+    // add (one by one) all codes with their codeLengths taking into account the number of repetitions
+    while ( inf.code<numberOfCodes ) {
+        assert( inf.repetitions==0 );
+        
+        // read a new command
+        if ( inf.command==Command_ReadNext ) {
+            if ( !InfBS_ReadCompressedBits(infptr, &inf.command, decoder) ) { return Inf_FALSE; }
+        }
+        // process simple command
+        if ( inf.command<=MaxValidLength ) {
+            _codeLengths.add(inf.code++,inf.length=inf.command);
+        }
+        // process command with repetition
+        else {
+            switch (inf.command) {
+                case Command_CopyPreviousLength:
+                    if (inf.code==0) { /* codeLengths.markAsError(); */ return Inf_TRUE; }
+                    if ( !InfBS_ReadBits(infptr,&value,2) ) { return Inf_FALSE; }
+                    inf.repetitions = 3 + value;
+                    break;
+                case Command_RepeatZeroLength_3:
+                    if ( !InfBS_ReadBits(infptr,&value,3) ) { return Inf_FALSE; }
+                    inf.length      = 0;
+                    inf.repetitions = 3 + value;
+                    break;
+                case Command_RepeatZeroLength_11:
+                    if ( !InfBS_ReadBits(infptr,&value,7) ) { return Inf_FALSE; }
+                    inf.length      = 0;
+                    inf.repetitions = 11 + value;
+                    break;
+                default:
+                    /* codeLengths.markAsError(); */
+                    return Inf_TRUE;
+            }
+            while (inf.code<numberOfCodes && inf.repetitions>0) {
+                _codeLengths.add(inf.code++,inf.length); --inf.repetitions;
+            }
+        }
+        // mark current command as finished
+        inf.command = Command_ReadNext;
+    }
+    return Inf_TRUE;
+}
+
+
+
+//======================================================================================================================
 #   pragma mark - ???
 
 
@@ -165,102 +261,6 @@ typedef enum BlockType {
     BlockType_FixedHuffman = 1,
     BlockType_DynamicHuffman = 2,
 } BlockType;
-
-
- struct CodeLengthsReader {
-     unsigned           _command;
-     unsigned           _code;
-     unsigned           _length;
-     unsigned           _repetitions;
-     PDZip::CodeLengths _codeLengths;
-
-     void reset() { _command = _length = _repetitions = 0; }
-     void begin() { _code=0; _codeLengths.open(); }
-     void end()   { _codeLengths.close(); }
-     const PDZip::CodeLengths& operator *() const { return _codeLengths; }
-
-     bool read(Inflater* infptr, unsigned numberOfCodes) {
-         assert( _codeLengths.isOpen() );
-         assert( numberOfCodes>0 );
-         assert( infptr!=NULL );
-         static const unsigned MaximumNumberOfCodes = 19;
-         static const unsigned order[MaximumNumberOfCodes] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
-         unsigned char* const internalArray = _codeLengths.getInternalArray(MaximumNumberOfCodes);
-         
-         const unsigned end = (numberOfCodes<MaximumNumberOfCodes) ? numberOfCodes : MaximumNumberOfCodes;
-         while (_code<end) {
-             unsigned length;
-             if ( !InfBS_ReadBits(infptr,&length,3) ) { return false; }
-             internalArray[order[_code]] = length;
-             ++_code;
-         }
-         while (_code<MaximumNumberOfCodes) { internalArray[order[_code++]] = 0; }
-         _codeLengths.addFromInternalArray(internalArray,MaximumNumberOfCodes);
-         return true;
-     }
-     
-     bool read(Inflater* infptr, unsigned numberOfCodes, const PDZip::ReversedHuffmanDecoder* decoder) {
-         assert( _codeLengths.isOpen() );
-         assert( numberOfCodes>0 );
-         assert( infptr!=NULL );
-         static const unsigned MaxValidLength = 15; // < the maximum length that can be read
-         enum Command {
-             Command_ReadNext            = 0,  // < load next command
-             Command_CopyPreviousLength  = 16, // < repeat the previous length
-             Command_RepeatZeroLength_3  = 17, // < repeat zero length (3 or more times)
-             Command_RepeatZeroLength_11 = 18  // < repeat zero length (11 or more times)
-         };
-         unsigned value = 0;
-
-         // IMPORTANT: add any repetition that is pending from a previous load (ex: literals-table > distance-table)
-         while (_code<numberOfCodes && _repetitions>0) {
-             _codeLengths.add(_code++,_length); --_repetitions;
-         }
-         
-         // add (one by one) all codes with their codeLengths taking into account the number of repetitions
-         while ( _code<numberOfCodes ) {
-             assert( _repetitions==0 );
-             
-             // read a new command
-             if ( _command==Command_ReadNext ) {
-                 if ( !InfBS_ReadHuffmanBits(infptr, &_command, decoder) ) { return false; }
-             }
-             // process simple command
-             if ( _command<=MaxValidLength ) {
-                 _codeLengths.add(_code++,_length=_command);
-             }
-             // process command with repetition
-             else {
-                 switch (_command) {
-                     case Command_CopyPreviousLength:
-                         if (_code==0) { /* codeLengths.markAsError(); */ return true; }
-                         if ( !InfBS_ReadBits(infptr,&value,2) ) { return false; }
-                         _repetitions = 3 + value;
-                         break;
-                     case Command_RepeatZeroLength_3:
-                         if ( !InfBS_ReadBits(infptr,&value,3) ) { return false; }
-                         _length      = 0;
-                         _repetitions = 3 + value;
-                         break;
-                     case Command_RepeatZeroLength_11:
-                         if ( !InfBS_ReadBits(infptr,&value,7) ) { return false; }
-                         _length      = 0;
-                         _repetitions = 11 + value;
-                         break;
-                     default:
-                         /* codeLengths.markAsError(); */
-                         return true;
-                 }
-                 while (_code<numberOfCodes && _repetitions>0) {
-                     _codeLengths.add(_code++,_length); --_repetitions;
-                 }
-             }
-             // mark current command as finished
-             _command = Command_ReadNext;
-         }
-         return true;
-     }
- };
 
 
 #   define op_goto(dest_step)        step=dest_step; break;
@@ -330,7 +330,6 @@ static PDZip::ReversedHuffmanDecoder* getFixedDistanceDecoder() {
 }
 
 /* TODO: remove these globals! */
-static CodeLengthsReader              _codeLengths;
 static PDZip::ReversedHuffmanDecoder  _huffmanDecoder0;
 static PDZip::ReversedHuffmanDecoder  _huffmanDecoder1;
 static PDZip::ReversedHuffmanDecoder  _huffmanDecoder2;
@@ -338,13 +337,6 @@ static PDZip::ReversedHuffmanDecoder  _huffmanDecoder2;
 
 /**
  * Decompress a chunk of compressed data
- *
- * @param inputPtr
- *     The pointer to the position from where the compressed data will be read
- *
- * @param inout_inputBytes
- *     [in]  The number of bytes available to read.
- *     [out] The number of bytes successfully read
  *
  * @param outputPtr
  *     The pointer to the position where the resulting uncompressed data will be written to.
@@ -361,10 +353,6 @@ static PDZip::ReversedHuffmanDecoder  _huffmanDecoder2;
  *     The total size of the output buffer (in number of bytes)
  */
 InfAction Inf_decompress(Inflater*                  infptr,
-                         /*
-                         const unsigned char* const inputPtr,
-                         size_t*                    inout_inputBytes,
-                          */
                          unsigned char* const       outputPtr,
                          size_t*                    inout_outputBytes,
                          unsigned char* const       outputBufferBegin,
@@ -499,44 +487,42 @@ InfAction Inf_decompress(Inflater*                  infptr,
             // load "front" huffman table
             //
             case InfStep_Load_FrontHuffmanTable:
-                _codeLengths.reset();
-                _codeLengths.begin();
+                InfCL_Begin(infptr);
                 op_fallthrough(InfStep_Load_FrontHuffmanTable2);
                 
             case InfStep_Load_FrontHuffmanTable2:
-                if ( !_codeLengths.read(infptr,inf._hclen+4) ) { op_return(InfAction_FillInputBuffer); }
-                _codeLengths.end();
+                if ( !InfCL_ReadCodes(infptr,inf._hclen+4) ) { op_return(InfAction_FillInputBuffer); }
+                InfCL_End(infptr);
                 inf._frontDecoder = &_huffmanDecoder0;
-                inf._frontDecoder->load( *_codeLengths );
+                inf._frontDecoder->load( _codeLengths );
                 op_fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
             //----------------------------------
             // load literal-length huffman table
             //
             case InfStep_Load_LiteralHuffmanTable:
-                _codeLengths.reset();
-                _codeLengths.begin();
+                InfCL_Begin(infptr);
                 op_fallthrough(InfStep_Load_LiteralHuffmanTable2);
                 
             case InfStep_Load_LiteralHuffmanTable2:
-                if ( !_codeLengths.read(infptr,inf._hlit+257,inf._frontDecoder) ) { op_return(InfAction_FillInputBuffer); }
-                _codeLengths.end();
+                if ( !InfCL_ReadCompressedCodes(infptr,inf._hlit+257,inf._frontDecoder) ) { op_return(InfAction_FillInputBuffer); }
+                InfCL_End(infptr);
                 inf._literalDecoder = &_huffmanDecoder1;
-                inf._literalDecoder->load( *_codeLengths );
+                inf._literalDecoder->load( _codeLengths );
                 op_fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
             //----------------------------------
             // load distance huffman table
             //
             case InfStep_Load_DistanceHuffmanTable:
-                _codeLengths.begin();
+                InfCL_BeginAndContinue(infptr);
                 op_fallthrough(InfStep_Load_DistanceHuffmanTable2);
                 
             case InfStep_Load_DistanceHuffmanTable2:
-                if ( !_codeLengths.read(infptr,inf._hdist+1,inf._frontDecoder) ) { op_return(InfAction_FillInputBuffer); }
-                _codeLengths.end();
+                if ( !InfCL_ReadCompressedCodes(infptr,inf._hdist+1,inf._frontDecoder) ) { op_return(InfAction_FillInputBuffer); }
+                InfCL_End(infptr);
                 inf._distanceDecoder = &_huffmanDecoder2;
-                inf._distanceDecoder->load( *_codeLengths );
+                inf._distanceDecoder->load( _codeLengths );
                 op_fallthrough(InfStep_Process_CompressedBlock);
                 
             //-------------------------------------------------------------------------------------
@@ -544,7 +530,7 @@ InfAction Inf_decompress(Inflater*                  infptr,
             //
             case InfStep_Process_CompressedBlock:
             case InfStep_Read_LiteralOrLength:
-                if ( !InfBS_ReadHuffmanBits(infptr,&inf._literal,inf._literalDecoder) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf._literalDecoder) ) { op_return(InfAction_FillInputBuffer); }
                 op_fallthrough(InfStep_Read_LiteralOrLength2);
                 
             case InfStep_Read_LiteralOrLength2:
@@ -568,7 +554,7 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 op_fallthrough(InfStep_Read_Distance);
                 
             case InfStep_Read_Distance:
-                if ( !InfBS_ReadHuffmanBits(infptr,&inf._literal,inf._distanceDecoder) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf._distanceDecoder) ) { op_return(InfAction_FillInputBuffer); }
                 if (inf._literal>MaxValidDistanceCode) { op_fatal_error(InfError_BadBlockContent); }
                 op_fallthrough(InfStep_Read_DistanceBits);
                 
