@@ -68,7 +68,9 @@ typedef enum InfAction {
     InfAction_Init                   = 1024
 } InfAction;
 
-typedef int InfBool;
+typedef int InfBool; ///< Boolean value
+#define Inf_FALSE 0
+#define Inf_TRUE  1
 
 typedef struct InfData {
     const void* buffer;
@@ -94,11 +96,16 @@ typedef struct Inflater {
     InfDataProviderFunc dataProviderFunc;
     InfDataReceiverFunc dataReceiverFunc;
     
-    const Byte* inputChunk;
-    size_t      inputChunkSize;
-    Byte*       outputChunk;
-    size_t      outputChunkSize;
-    size_t      outputBufferContentSize;
+    /* inflaterProcessChunk(..) */
+
+    Byte*       outputChunk;             ///< pointer to the last decompressed chunk of data
+    size_t      outputChunkSize;         ///< number of decompressed bytes in 'outputChunk'
+    size_t      outputBufferContentSize; ///< total number of decompressed bytes in OutputBuffer when 'InfAction_UseOutputBufferContent'
+
+    const Byte* inputChunkPtr;
+    const Byte* inputChunkEnd;
+    /* size_t      inputChunkSize; */
+    
     
     /* inflaterTake / inflaterFeed */
     
@@ -110,7 +117,7 @@ typedef struct Inflater {
     
     
     /* HIDDEN: decompress */
-    int       _op;
+    int       step;
     
     unsigned _zlibheader;
     unsigned _zlibheader_method; // < compression method
@@ -119,8 +126,8 @@ typedef struct Inflater {
     
     unsigned _lastBlock;
     unsigned _blocktype;
-    unsigned _bitbuffer;
-    unsigned _bitcounter;
+    unsigned bitbuffer;  ///< bit-stream buffer
+    unsigned bitcounter; ///< number of bits contained in 'bitbuffer'
     
     unsigned _hlit;
     unsigned _hdist;
