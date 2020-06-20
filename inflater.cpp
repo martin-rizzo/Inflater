@@ -145,16 +145,28 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 
 
 //======================================================================================================================
-#   pragma mark - READING CODE LENGTHS
+#   pragma mark - READING CODE/LENGTHS PAIRS
 
 static PDZip::CodeLengths _codeLengths;
 
+/*
+static const unsigned* InfCL_GetTable(Inflater* infptr) {
+    return _codeLengths.getSourTable();
+}
+*/
 
-static void InfCL_Begin(Inflater* infptr) { inf.command = inf.length = inf.repetitions = inf.code = 0; _codeLengths.open(); }
+static void InfCL_Open(Inflater* infptr) {
+    inf.command = inf.length = inf.repetitions = inf.code = 0; _codeLengths.open();
+}
 
-static void InfCL_BeginAndContinue(Inflater* infptr) { inf.code = 0; _codeLengths.open(); }
+static void InfCL_Open_Continue(Inflater* infptr) {
+    inf.code = 0; _codeLengths.open();
+}
 
-static void InfCL_End(Inflater* infptr) { _codeLengths.close(); }
+static const unsigned* InfCL_Close(Inflater* infptr) {
+    _codeLengths.close();
+    return _codeLengths.getSourTable();
+}
 
 static InfBool InfCL_ReadCodes(Inflater* infptr, unsigned numberOfCodes) {
     assert( _codeLengths.isOpen() );
@@ -399,7 +411,7 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 op_fallthrough(InfStep_ReadZLibHeader);
                 
             //-------------------------------------------------------------------------------------
-            // Read_ZLibHeader
+            // infstep: READ_ZLIB_HEADER
             //
             case InfStep_ReadZLibHeader:
                 if ( !InfBS_ReadWord(infptr,&inf._zlibheader) ) { op_return(InfAction_FillInputBuffer); }
@@ -417,7 +429,7 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 op_fallthrough(InfStep_ProcessNextBlock);
                 
             //-------------------------------------------------------------------------------------
-            // Read_BlockHeader
+            // infstep: READ_BLOCK_HEADER
             //
             case InfStep_ProcessNextBlock:
                 if (inf._lastBlock) {
@@ -487,42 +499,39 @@ InfAction Inf_decompress(Inflater*                  infptr,
             // load "front" huffman table
             //
             case InfStep_Load_FrontHuffmanTable:
-                InfCL_Begin(infptr);
+                InfCL_Open(infptr);
                 op_fallthrough(InfStep_Load_FrontHuffmanTable2);
                 
             case InfStep_Load_FrontHuffmanTable2:
                 if ( !InfCL_ReadCodes(infptr,inf._hclen+4) ) { op_return(InfAction_FillInputBuffer); }
-                InfCL_End(infptr);
                 inf._frontDecoder = &_huffmanDecoder0;
-                inf._frontDecoder->load( _codeLengths );
+                inf._frontDecoder->load( InfCL_Close(infptr) );
                 op_fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
             //----------------------------------
             // load literal-length huffman table
             //
             case InfStep_Load_LiteralHuffmanTable:
-                InfCL_Begin(infptr);
+                InfCL_Open(infptr);
                 op_fallthrough(InfStep_Load_LiteralHuffmanTable2);
                 
             case InfStep_Load_LiteralHuffmanTable2:
                 if ( !InfCL_ReadCompressedCodes(infptr,inf._hlit+257,inf._frontDecoder) ) { op_return(InfAction_FillInputBuffer); }
-                InfCL_End(infptr);
                 inf._literalDecoder = &_huffmanDecoder1;
-                inf._literalDecoder->load( _codeLengths );
+                inf._literalDecoder->load( InfCL_Close(infptr) );
                 op_fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
             //----------------------------------
             // load distance huffman table
             //
             case InfStep_Load_DistanceHuffmanTable:
-                InfCL_BeginAndContinue(infptr);
+                InfCL_Open_Continue(infptr);
                 op_fallthrough(InfStep_Load_DistanceHuffmanTable2);
                 
             case InfStep_Load_DistanceHuffmanTable2:
                 if ( !InfCL_ReadCompressedCodes(infptr,inf._hdist+1,inf._frontDecoder) ) { op_return(InfAction_FillInputBuffer); }
-                InfCL_End(infptr);
                 inf._distanceDecoder = &_huffmanDecoder2;
-                inf._distanceDecoder->load( _codeLengths );
+                inf._distanceDecoder->load( InfCL_Close(infptr) );
                 op_fallthrough(InfStep_Process_CompressedBlock);
                 
             //-------------------------------------------------------------------------------------

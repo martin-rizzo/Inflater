@@ -119,6 +119,10 @@ namespace PDZip {
             }
         }
         
+        inline const unsigned* getSourTable() const {
+            return _table;
+        }
+        
         inline int size() const {
             return _size;
         }
@@ -212,8 +216,11 @@ namespace PDZip {
         bool isLoaded() const {
             return _table[0].raw() != 0;
         }
-        
+
+        void load(const unsigned* table);
+
         void load(const CodeLengths& codeLengths);
+        
         
         Data decode8(unsigned bits8) const {
             return _table[bits8 & 0xFF];

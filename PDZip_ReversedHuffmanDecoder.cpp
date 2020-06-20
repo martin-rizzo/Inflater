@@ -77,12 +77,120 @@ static inline int makeSubTable(Data*              subtable,
 #undef CodeLengths
 
 
+//==================================================================================================================
+#pragma mark - CODE-LENGTHS RELATED FUNCTIONS
+
+static const int      LastValidLength = 18;
+static const int      LastValidCode   = 290;
+static const int      TableSize       = (LastValidLength+1)+(LastValidCode+1);
+static const unsigned NextIndexMask   = 0x03FF;
+static const unsigned LengthMask      = 0x3F;
+static const unsigned CodeMask        = 0xFFFF;
+
+
+static int CL_getFirstIndex(const unsigned* sourtable) {
+    assert( sourtable!=NULL );
+    return NextIndexMask & sourtable[0];
+}
+
+static int CL_getNextIndex(const unsigned* sourtable, int index) {
+    assert( sourtable!=NULL );
+    assert( 0<=index && index<TableSize );
+    return NextIndexMask & sourtable[index];
+}
+
+
+static unsigned CL_getCodeAt(const unsigned* sourtable, int index) {
+    assert( sourtable!=NULL );
+    assert( 0<=index && index<TableSize );
+    return CodeMask & sourtable[index]>>16;
+}
+
+static unsigned CL_getLengthAt(const unsigned* sourtable, int index) {
+    assert( sourtable!=NULL );
+    assert( 0<=index && index<TableSize );
+    return LengthMask & sourtable[index]>>10;
+}
+
+
+#define Data PDZip::ReversedHuffmanDecoder::Data
+
+static inline int CL_makeSubTable(Data*              subtable,
+                                  int                availableEntries,
+                                  unsigned           firstHuffman,
+                                  unsigned           maxLength,
+                                  const unsigned*    sourtable,
+                                  int                firstIndex,
+                                  int                endIndex)
+{
+    static const unsigned DiscardedBits = 8; // < number of bits discarded by the subtable
+    const int numberOfEntries = 1<<(maxLength-DiscardedBits);
+    
+    assert( numberOfEntries<=availableEntries  );
+    
+    unsigned huffman = firstHuffman;
+    int      index   = firstIndex;
+    while ( index!=endIndex ) {
+        const unsigned code   = CL_getCodeAt(sourtable,index);
+        const unsigned length = CL_getLengthAt(sourtable,index);
+        const Data     data   = Data::fromCodeLength(code,length);
+        setWithRepetitions(subtable, numberOfEntries, huffman>>DiscardedBits, data, length-DiscardedBits);
+
+        huffman = reversedINC(huffman,length);
+        index   = CL_getNextIndex(sourtable,index);
+    }
+    return numberOfEntries;
+}
+
+#undef Data
+
+
 namespace PDZip {
 
     
     //==================================================================================================================
 #   pragma mark - LOADING THE HUFFMAN TABLE
 
+void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
+    assert( sourtable!=NULL  );
+    
+    // reset the main-table
+    std::memset(_table, 0, MainTableSize*sizeof(Data));
+    
+    unsigned huffman = 0;
+    int      index   = CL_getFirstIndex(sourtable);
+    unsigned length  = CL_getLengthAt(sourtable,index);
+
+    // lengths from 1 to 8
+    // unknown bits are filled with all possible values
+    while ( index!=0 && length<=8 ) {
+        const Data data = Data::fromCodeLength(CL_getCodeAt(sourtable,index),length);
+        setWithRepetitions(_table, 256, huffman, data, length);
+        huffman = reversedINC(huffman,length);
+        index   = CL_getNextIndex(sourtable,index);
+        length  = CL_getLengthAt(sourtable,index);
+    }
+    // lengths from 9
+    // subtables are created
+    int insertIndex = MainTableSize;
+    while ( index!=0 ) {
+        const unsigned firstHuffman = huffman;
+        const int      firstIndex   = index;
+        do {
+            length  = CL_getLengthAt(sourtable,index);
+            huffman = reversedINC(huffman,length);
+            index   = CL_getNextIndex(sourtable,index);
+        } while ( index!=0 && (huffman&0xFF)==(firstHuffman&0xFF) );
+        
+        const unsigned maxLength = length;
+        _table[firstHuffman] = Data::fromIndexMask(insertIndex, (1<<(maxLength-8))-1);
+        insertIndex += CL_makeSubTable(&_table[insertIndex],
+                                       (FullTableSize-insertIndex),
+                                       firstHuffman, maxLength,
+                                       sourtable, firstIndex, index
+                                       );
+    }
+}
     
     void ReversedHuffmanDecoder::load(const CodeLengths& codeLengths) {
         assert( codeLengths.isOpen()==false );
