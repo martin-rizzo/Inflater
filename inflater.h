@@ -42,10 +42,14 @@ namespace PDZip {
 #define InfMinBufferSize    (32*1024)
 #define InfHelperBufferSize (64*1024)
 
+#define Inf_EndOfBlock           256
+#define Inf_MaxValidLengthCode   285
+#define Inf_MaxValidDistanceCode 29
+#define Inf_LastValidLength      18
+#define Inf_LastValidCode        290
+#define Inf_CodeLengthTableSize  ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
+#define Inf_NextIndexMask        0x03FF
 
-/*
-typedef size_t (*InflaterProviderFunc2)(struct Inflater* inflater, unsigned char* bytes, size_t numberOfBytes);
-*/
 
 
 typedef enum InfError {
@@ -71,6 +75,7 @@ typedef enum InfAction {
 typedef int InfBool; ///< Boolean value
 #define Inf_FALSE 0
 #define Inf_TRUE  1
+
 
 typedef struct InfData {
     const void* buffer;
@@ -138,10 +143,18 @@ typedef struct Inflater {
     unsigned _seq_len;
     
     /* HIDDEN: code lengths reader */
-    unsigned command;
-    unsigned code;
-    unsigned length;
-    unsigned repetitions;
+    struct {
+        unsigned  command;
+        unsigned  code;
+        unsigned  length;
+        unsigned  repetitions;
+        unsigned* insertPtr[Inf_LastValidLength+1];
+        unsigned  table[Inf_CodeLengthTableSize];
+        unsigned char lengths[19];
+        int       nextIndex;
+        int       size;
+    } cl;
+
 
     
     PDZip::ReversedHuffmanDecoder* _frontDecoder;     ///< The base decoder used to decode the next 2 decoders (it's crazy!)
