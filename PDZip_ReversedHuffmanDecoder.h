@@ -19,13 +19,6 @@
 #include <cassert>
 
 
-/*
-                <   16bits   >:<   16bits   >
- code,length  = 0000[ length ]:[1][  code   ]
- reindex,mask = 0000[  mask  ]:[0][ reindex ]
-*/
-
-
 typedef union InfHuff {
     struct value {
         unsigned length:15;
@@ -246,10 +239,10 @@ namespace PDZip {
 
         void load(const unsigned* table);
 
+        /*
         void load(const CodeLengths& codeLengths);
-        
-        
-        InfHuff decode8(unsigned bits8) const {
+
+         InfHuff decode8(unsigned bits8) const {
             return _table[bits8 & 0xFF];
         }
         
@@ -262,6 +255,7 @@ namespace PDZip {
             InfHuff data = _table[bits16 & 0xFF];
             return data.value.isvalid ? data : decode16(bits16,data);
         }
+        */
 
     public:
 #   if !defined(NDEBUG)
@@ -276,7 +270,7 @@ namespace PDZip {
 
 #   endif
 
-    private:
+    public:
         InfHuff _table[FullTableSize];
     };
     

@@ -46,6 +46,7 @@ static inline void setWithRepetitions(InfHuff*  table,
     }
 }
 
+/*
 static inline int makeSubTable(InfHuff*           subtable,
                                int                availableEntries,
                                unsigned           firstHuffman,
@@ -75,6 +76,7 @@ static inline int makeSubTable(InfHuff*           subtable,
     }
     return numberOfEntries;
 }
+*/
 
 #undef Data
 #undef CodeLengths
@@ -84,6 +86,7 @@ static inline int makeSubTable(InfHuff*           subtable,
 #pragma mark - CODE-LENGTHS RELATED FUNCTIONS
 
 static const int      LastValidLength = 18;
+static const int      InvalidLength   = 24;
 static const int      LastValidCode   = 290;
 static const int      TableSize       = (LastValidLength+1)+(LastValidCode+1);
 static const unsigned NextIndexMask   = 0x03FF;
@@ -161,7 +164,12 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
     assert( sourtable!=NULL  );
     
     // reset the main-table
-    std::memset(_table, 0, MainTableSize*sizeof(InfHuff));
+    // std::memset(_table, 0, MainTableSize*sizeof(InfHuff));
+    InfHuff invalid;
+    invalid.value.isvalid = 1;
+    invalid.value.code    = 0;
+    invalid.value.length  = InvalidLength;
+    for (int i=0; i<MainTableSize; ++i) { _table[i] = invalid; }
     
     unsigned huffman = 0;
     int      index   = CL_getFirstIndex(sourtable);
@@ -205,6 +213,7 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
     }
 }
     
+/*
     void ReversedHuffmanDecoder::load(const CodeLengths& codeLengths) {
         assert( codeLengths.isOpen()==false );
         
@@ -255,7 +264,7 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
         //    _printDebugInfo();
         //}
     }
-
+*/
     
     //==================================================================================================================
 #   pragma mark - GETTING DEBUG INFORMATION

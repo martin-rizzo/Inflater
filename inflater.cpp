@@ -43,7 +43,14 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
 
 //======================================================================================================================
-#   pragma mark - READING BIT STREAM
+#   pragma mark - HUFFMAN DECODER
+
+#define InfHD_decode(table, tmp, bitbuffer) \
+    (tmp=table[bitbuffer & 0xFF], tmp.value.isvalid ? tmp : table[ tmp.subtable.index + ((bitbuffer>>8) & tmp.subtable.mask) ])
+
+
+//======================================================================================================================
+#   pragma mark - BIT STREAM
 
 /** Loads the next byte (8 bits) from the input stream to the bitbuffer */
 static InfBool InfBS_LoadNextByte(Inflater* infptr) {
@@ -56,7 +63,10 @@ static InfBool InfBS_LoadNextByte(Inflater* infptr) {
 /** Reads a sequence of bits from the bitbuffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
 static InfBool InfBS_ReadBits(Inflater* infptr, unsigned* dest, int numberOfBitsToRead) {
     assert( infptr!=NULL && dest!=NULL && numberOfBitsToRead>=0 );
-    while (inf.bitcounter<numberOfBitsToRead) { if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }  }
+    
+    while (inf.bitcounter<numberOfBitsToRead) {
+        if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
+    }
     (*dest) = inf.bitbuffer & ((1<<numberOfBitsToRead)-1);
     inf.bitbuffer  >>= numberOfBitsToRead;
     inf.bitcounter  -= numberOfBitsToRead;
@@ -65,37 +75,19 @@ static InfBool InfBS_ReadBits(Inflater* infptr, unsigned* dest, int numberOfBits
 
 /** Reads a sequence of huffman encoded bits from the buffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
 static InfBool InfBS_ReadCompressedBits(Inflater* infptr, unsigned* dest, const PDZip::ReversedHuffmanDecoder* decoder) {
+    unsigned numberOfBitsToAdvance; InfHuff data, tmp;  const InfHuff *table = decoder->_table;
     assert( infptr!=NULL && dest!=NULL && decoder!=NULL && decoder->isLoaded() );
-    InfHuff data;
 
-    // TODO: optimize `readBits` for when there are enough input buffer data
-    if ( inf.bitcounter>0 ) {
-        data = decoder->decode8(inf.bitbuffer);
-        if (data.value.isvalid && data.value.length<=inf.bitcounter) {
-            inf.bitbuffer >>= data.value.length;
-            inf.bitcounter -= data.value.length;
-            (*dest) = data.value.code;
-            return Inf_TRUE;
-        }
+    if (inf.bitcounter==0 && !InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
+    data=InfHD_decode(table, tmp, inf.bitbuffer); numberOfBitsToAdvance=data.value.length;
+    
+    while (inf.bitcounter<numberOfBitsToAdvance) {
+        if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
+        data=InfHD_decode(table, tmp, inf.bitbuffer); numberOfBitsToAdvance=data.value.length;
     }
-    if ( inf.bitcounter<8 && !InfBS_LoadNextByte(infptr) ) { return Inf_FALSE; }
-    data = decoder->decode8(inf.bitbuffer);
-    if (data.value.isvalid) {
-        inf.bitbuffer  >>= data.value.length;
-        inf.bitcounter  -= data.value.length;
-        (*dest) = data.value.code;
-        return Inf_TRUE;
-    }
-    if ( inf.bitcounter<16 && !InfBS_LoadNextByte(infptr) ) { return Inf_FALSE; }
-    data = decoder->decode16(inf.bitbuffer,data);
-    if (data.value.isvalid) {
-        inf.bitbuffer >>= data.value.length;
-        inf.bitcounter -= data.value.length;
-        (*dest) = data.value.code;
-        return Inf_TRUE;
-    }
-    assert( 0 );
-    (*dest) = static_cast<unsigned>(-1);
+    (*dest) = data.value.code;
+    inf.bitbuffer >>= numberOfBitsToAdvance;
+    inf.bitcounter -= numberOfBitsToAdvance;
     return Inf_TRUE;
 }
 
@@ -817,7 +809,7 @@ size_t inflaterTake(Inflater* inf, void* decompressedData, size_t decompressedDa
     
     if (isFinished(inf)) { return 0; }
 
-    while ( destBytesStillNeeded>0 )
+    while ( destBytesStillNeeded>0 && inf->action!=InfAction_Finish )
     {
         fillInputBuffer = (inf->action==InfAction_Init || inf->action==InfAction_FillInputBuffer);
         
