@@ -20,7 +20,7 @@
 //======================================================================================================================
 #   pragma mark - INTERNAL LINKAGE [only for this transaction unit]
 
-#define Data        PDZip::ReversedHuffmanDecoder::Data
+/* #define Data        PDZip::ReversedHuffmanDecoder::Data */
 #define CodeLengths PDZip::CodeLengths
 
 
@@ -31,11 +31,11 @@ static inline unsigned reversedINC(unsigned huffman, unsigned length) {
     return huffman;
 }
 
-static inline void setWithRepetitions(Data*    table,
-                                      unsigned availableEntries,
-                                      unsigned huffman,
-                                      Data     data,
-                                      unsigned length)
+static inline void setWithRepetitions(InfHuff*  table,
+                                      unsigned  availableEntries,
+                                      unsigned  huffman,
+                                      InfHuff   data,
+                                      unsigned  length)
 {
     assert( table!=NULL );
     assert( huffman < (1<<length) );
@@ -46,7 +46,7 @@ static inline void setWithRepetitions(Data*    table,
     }
 }
 
-static inline int makeSubTable(Data*              subtable,
+static inline int makeSubTable(InfHuff*           subtable,
                                int                availableEntries,
                                unsigned           firstHuffman,
                                unsigned           maxLength,
@@ -64,7 +64,10 @@ static inline int makeSubTable(Data*              subtable,
     while ( index!=endIndex ) {
         const unsigned code   = codeLengths.getCodeAt(index);
         const unsigned length = codeLengths.getLengthAt(index);
-        const Data     data   = Data::fromCodeLength(code,length);
+        InfHuff data;
+        data.value.code    = code;
+        data.value.length  = length;
+        data.value.isvalid = 1;
         setWithRepetitions(subtable, numberOfEntries, huffman>>DiscardedBits, data, length-DiscardedBits);
 
         huffman = reversedINC(huffman,length);
@@ -113,9 +116,9 @@ static unsigned CL_getLengthAt(const unsigned* sourtable, int index) {
 }
 
 
-#define Data PDZip::ReversedHuffmanDecoder::Data
+/* #define Data PDZip::ReversedHuffmanDecoder::Data */
 
-static inline int CL_makeSubTable(Data*              subtable,
+static inline int CL_makeSubTable(InfHuff*           subtable,
                                   int                availableEntries,
                                   unsigned           firstHuffman,
                                   unsigned           maxLength,
@@ -133,7 +136,10 @@ static inline int CL_makeSubTable(Data*              subtable,
     while ( index!=endIndex ) {
         const unsigned code   = CL_getCodeAt(sourtable,index);
         const unsigned length = CL_getLengthAt(sourtable,index);
-        const Data     data   = Data::fromCodeLength(code,length);
+        InfHuff data;
+        data.value.code    = code;
+        data.value.length  = length;
+        data.value.isvalid = 1;
         setWithRepetitions(subtable, numberOfEntries, huffman>>DiscardedBits, data, length-DiscardedBits);
 
         huffman = reversedINC(huffman,length);
@@ -155,7 +161,7 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
     assert( sourtable!=NULL  );
     
     // reset the main-table
-    std::memset(_table, 0, MainTableSize*sizeof(Data));
+    std::memset(_table, 0, MainTableSize*sizeof(InfHuff));
     
     unsigned huffman = 0;
     int      index   = CL_getFirstIndex(sourtable);
@@ -164,7 +170,10 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
     // lengths from 1 to 8
     // unknown bits are filled with all possible values
     while ( index!=0 && length<=8 ) {
-        const Data data = Data::fromCodeLength(CL_getCodeAt(sourtable,index),length);
+        InfHuff data;
+        data.value.isvalid = 1;
+        data.value.code    = CL_getCodeAt(sourtable,index);
+        data.value.length  = length;
         setWithRepetitions(_table, 256, huffman, data, length);
         huffman = reversedINC(huffman,length);
         index   = CL_getNextIndex(sourtable,index);
@@ -183,7 +192,11 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
         } while ( index!=0 && (huffman&0xFF)==(firstHuffman&0xFF) );
         
         const unsigned maxLength = length;
-        _table[firstHuffman] = Data::fromIndexMask(insertIndex, (1<<(maxLength-8))-1);
+        InfHuff data;
+        data.subtable.error = 0;
+        data.subtable.index = insertIndex;
+        data.subtable.mask  = (1<<(maxLength-8))-1;
+        _table[firstHuffman] = data;
         insertIndex += CL_makeSubTable(&_table[insertIndex],
                                        (FullTableSize-insertIndex),
                                        firstHuffman, maxLength,
@@ -196,7 +209,7 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
         assert( codeLengths.isOpen()==false );
         
         // reset the main-table
-        std::memset(_table, 0, MainTableSize*sizeof(Data));
+        std::memset(_table, 0, MainTableSize*sizeof(InfHuff));
         
         unsigned huffman = 0;
         int      index   = codeLengths.getFirstIndex();
@@ -205,7 +218,10 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
         // lengths from 1 to 8
         // unknown bits are filled with all possible values
         while ( index!=0 && length<=8 ) {
-            const Data data = Data::fromCodeLength(codeLengths.getCodeAt(index),length);
+            InfHuff data;
+            data.value.isvalid = 1;
+            data.value.code    = codeLengths.getCodeAt(index);
+            data.value.length  = length;
             setWithRepetitions(_table, 256, huffman, data, length);
             huffman = reversedINC(huffman,length);
             index   = codeLengths.getNextIndex(index);
@@ -224,7 +240,11 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
             } while ( index!=0 && (huffman&0xFF)==(firstHuffman&0xFF) );
             
             const unsigned maxLength = length;
-            _table[firstHuffman] = Data::fromIndexMask(insertIndex, (1<<(maxLength-8))-1);
+            InfHuff data;
+            data.subtable.error = 0;
+            data.subtable.index = insertIndex;
+            data.subtable.mask  = (1<<(maxLength-8))-1;
+            _table[firstHuffman] = data;
             insertIndex += makeSubTable(&_table[insertIndex],
                                         (FullTableSize-insertIndex),
                                         firstHuffman, maxLength,
@@ -279,9 +299,9 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
         std::printf("\n");
         unsigned index=0; while (index<256) {
             if ( isPrintedFlags[index]==false ) {
-                if      ( _table[index].raw()==0  ) { _printDebugInfo_TableEntry(_table[index], index, 0); isPrintedFlags[index]=true; }
-                else if ( _table[index].isValid() ) { _printDebugInfo_CodeRepetition(_table, index, isPrintedFlags); }
-                else                                { _printDebugInfo_Subtable(_table, index, isPrintedFlags); }
+                if      ( _table[index].raw==0        ) { _printDebugInfo_TableEntry(_table[index], index, 0); isPrintedFlags[index]=true; }
+                else if ( _table[index].value.isvalid ) { _printDebugInfo_CodeRepetition(_table, index, isPrintedFlags); }
+                else                                    { _printDebugInfo_Subtable(_table, index, isPrintedFlags); }
             }
             index = index<255 ? reversedINC(index,8) : 256;
         }
@@ -291,26 +311,26 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
     /**
      * Prints debugging information about "code,length" repetitions in the internal huffman table
      */
-    void ReversedHuffmanDecoder::_printDebugInfo_CodeRepetition(Data* table, int firstIndex, bool* isPrintedFlags) {
+    void ReversedHuffmanDecoder::_printDebugInfo_CodeRepetition(InfHuff* table, int firstIndex, bool* isPrintedFlags) {
         assert( table!=NULL && firstIndex<MainTableSize && isPrintedFlags!=NULL );
-        assert( table[firstIndex].isValid() );
-        const Data     data             = table[firstIndex];
-        const unsigned rawRepeatedValue = data.raw();
+        assert( table[firstIndex].value.isvalid );
+        const InfHuff  data             = table[firstIndex];
+        const unsigned rawRepeatedValue = data.raw;
         
         // 1)) count number of repetitions
         int numberOfRepetitions = 0;
         for (int index=0; index<MainTableSize; ++index) {
-            if (table[index].raw()==rawRepeatedValue) { ++numberOfRepetitions; }
+            if (table[index].raw==rawRepeatedValue) { ++numberOfRepetitions; }
         }
         // 2)) print number of repetitions
-        const int  expectedRepetitions = 1<<(8-data.length());
+        const int  expectedRepetitions = 1<<(8-data.value.length);
         const bool showRepetitions = numberOfRepetitions!=1 || expectedRepetitions!=1;
         if (showRepetitions) { std::printf("      %d/%d repetitions of %d,%d\n",
-                                           numberOfRepetitions, expectedRepetitions, data.code(), data.length());
+                                           numberOfRepetitions, expectedRepetitions, data.value.code, data.value.length);
         }
         // 3)) print each repetition
         for (int index=0; index<MainTableSize; ++index) {
-            if (table[index].raw()==rawRepeatedValue) {
+            if (table[index].raw==rawRepeatedValue) {
                 _printDebugInfo_TableEntry(table[index],index,0);
                 isPrintedFlags[index] = true;
             }
@@ -321,11 +341,11 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
     /**
      * Prints debugging information about a subtable of the internal huffman table
      */
-    void ReversedHuffmanDecoder::_printDebugInfo_Subtable(Data* table, int index, bool* isPrintedFlags) {
+    void ReversedHuffmanDecoder::_printDebugInfo_Subtable(InfHuff* table, int index, bool* isPrintedFlags) {
         assert( table!=NULL && index<MainTableSize && isPrintedFlags!=NULL );
-        assert( table[index]._isPointer() );
-        const unsigned mask          = table[index]._mask();
-        const int      firstSubindex = table[index]._index();
+        assert( !table[index].subtable.error  );
+        const unsigned mask          = table[index].subtable.mask;
+        const int      firstSubindex = table[index].subtable.index;
         const int      lastSubindex  = firstSubindex + mask;
         unsigned       bitstream     = index;
         
@@ -341,11 +361,11 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
     /**
      * Prints debugging information about an entry in the internal huffman table
      */
-    void ReversedHuffmanDecoder::_printDebugInfo_TableEntry(Data data, unsigned bitStream, unsigned extraMask) {
+    void ReversedHuffmanDecoder::_printDebugInfo_TableEntry(InfHuff data, unsigned bitStream, unsigned extraMask) {
         extraMask <<= 8;
-        const bool     showExtraNumber = data.isValid();
-        const bool     showSeparator   = data.isValid() ? data.length()>8 : true;
-        const unsigned bracketPos      = data.isValid() && data.length()<=8 ? data.length() : 8;
+        const bool     showExtraNumber = data.value.isvalid;
+        const bool     showSeparator   = data.value.isvalid ? data.value.length>8 : true;
+        const unsigned bracketPos      = data.value.isvalid && data.value.length<=8 ? data.value.length : 8;
         // 1)) print the bit sequence of the recognized bitstream
         for (int bitOrder=15; bitOrder>=8; --bitOrder) {
             std::printf("%c", !(extraMask&(1<<bitOrder)) ? ' ' :
@@ -360,9 +380,9 @@ void ReversedHuffmanDecoder::load(const unsigned int *sourtable) {
         std::printf("]");
         
         // 2)) print the data attached to the recognized bitstream
-        if      (data.raw()==0)  { std::printf(" <empty>\n");                              }
-        else if (data.isValid()) { std::printf(" = %d,%d\n", data.code(), data.length());  }
-        else                     { std::printf(" --> ptr to index [%d]\n", data._index()); }
+        if      (data.raw==0)        { std::printf(" <empty>\n");                                     }
+        else if (data.value.isvalid) { std::printf(" = %d,%d\n", data.value.code, data.value.length); }
+        else                         { std::printf(" --> ptr to index [%d]\n", data.subtable.index);  }
     }
 
 

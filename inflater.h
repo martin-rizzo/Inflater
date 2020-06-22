@@ -144,15 +144,20 @@ typedef struct Inflater {
     
     /* HIDDEN: code lengths reader */
     struct {
+        /*
+           unsigned < 32bits >     <  16bits  >:<6bits>:< 10bits  >
+         [length,code,nextIndex] = [   code   ]:[ len ]:[nextIndex]
+         */
+        unsigned  table[Inf_CodeLengthTableSize];
         unsigned  command;
         unsigned  code;
         unsigned  length;
         unsigned  repetitions;
         unsigned* insertPtr[Inf_LastValidLength+1];
-        unsigned  table[Inf_CodeLengthTableSize];
         unsigned char lengths[19];
         int       nextIndex;
         int       size;
+        
     } cl;
 
 

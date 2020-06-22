@@ -17,6 +17,31 @@
 #define PDZip_InvHuffmanDecoder_h
 #ifdef __cplusplus
 #include <cassert>
+
+
+/*
+                <   16bits   >:<   16bits   >
+ code,length  = 0000[ length ]:[1][  code   ]
+ reindex,mask = 0000[  mask  ]:[0][ reindex ]
+*/
+
+
+typedef union InfHuff {
+    struct value {
+        unsigned length:15;
+        unsigned isvalid:1;
+        unsigned code:15;
+    } value;
+    struct subtable {
+        unsigned mask:15;
+        unsigned error:1;
+        unsigned index:15;
+    } subtable;
+    unsigned raw;
+} InfHuff;
+
+
+
 namespace PDZip {
 
 
@@ -185,6 +210,7 @@ namespace PDZip {
         static const int FullTableSize = 2*1024; // < main-table + all sub-tables 
 
     public:
+        /*
         class Data {
         public:
             Data() { }
@@ -205,16 +231,17 @@ namespace PDZip {
             Data(unsigned raw) : _raw(raw) { }
             unsigned _raw;
         };
+     */
         
     public:
         
         
         ReversedHuffmanDecoder() {
-            _table[0] = Data::fromRaw(0);
+            _table[0].raw = 0;
         }
         
         bool isLoaded() const {
-            return _table[0].raw() != 0;
+            return _table[0].raw != 0;
         }
 
         void load(const unsigned* table);
@@ -222,18 +249,18 @@ namespace PDZip {
         void load(const CodeLengths& codeLengths);
         
         
-        Data decode8(unsigned bits8) const {
+        InfHuff decode8(unsigned bits8) const {
             return _table[bits8 & 0xFF];
         }
         
-        Data decode16(unsigned bits16, Data data) const {
-            assert( data._isPointer() );
-            return _table[ data._index() + (bits16>>8 & data._mask()) ];
+        InfHuff decode16(unsigned bits16, InfHuff data) const {
+            assert( !data.subtable.error );
+            return _table[ data.subtable.index + (bits16>>8 & data.subtable.mask) ];
         }
 
-        Data decode16(unsigned bits16) const {
-            Data data = _table[bits16 & 0xFF];
-            return data.isValid() ? data : decode16(bits16,data);
+        InfHuff decode16(unsigned bits16) const {
+            InfHuff data = _table[bits16 & 0xFF];
+            return data.value.isvalid ? data : decode16(bits16,data);
         }
 
     public:
@@ -243,14 +270,14 @@ namespace PDZip {
          * Prints to console the current state of the internal huffman table
          */
         void        printDebugInfo();
-        static void _printDebugInfo_CodeRepetition(Data* table, int firstIndex, bool* isPrintedFlags);
-        static void _printDebugInfo_Subtable(Data* table, int index, bool* isPrintedFlags);
-        static void _printDebugInfo_TableEntry(Data data, unsigned bitStream, unsigned extraMask);
+        static void _printDebugInfo_CodeRepetition(InfHuff* table, int firstIndex, bool* isPrintedFlags);
+        static void _printDebugInfo_Subtable(InfHuff* table, int index, bool* isPrintedFlags);
+        static void _printDebugInfo_TableEntry(InfHuff data, unsigned bitStream, unsigned extraMask);
 
 #   endif
 
     private:
-        Data _table[FullTableSize];
+        InfHuff _table[FullTableSize];
     };
     
     

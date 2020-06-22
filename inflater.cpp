@@ -66,32 +66,32 @@ static InfBool InfBS_ReadBits(Inflater* infptr, unsigned* dest, int numberOfBits
 /** Reads a sequence of huffman encoded bits from the buffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
 static InfBool InfBS_ReadCompressedBits(Inflater* infptr, unsigned* dest, const PDZip::ReversedHuffmanDecoder* decoder) {
     assert( infptr!=NULL && dest!=NULL && decoder!=NULL && decoder->isLoaded() );
-    PDZip::ReversedHuffmanDecoder::Data data;
+    InfHuff data;
 
     // TODO: optimize `readBits` for when there are enough input buffer data
     if ( inf.bitcounter>0 ) {
         data = decoder->decode8(inf.bitbuffer);
-        if (data.isValid() && data.length()<=inf.bitcounter) {
-            inf.bitbuffer >>= data.length();
-            inf.bitcounter -= data.length();
-            (*dest) = data.code();
+        if (data.value.isvalid && data.value.length<=inf.bitcounter) {
+            inf.bitbuffer >>= data.value.length;
+            inf.bitcounter -= data.value.length;
+            (*dest) = data.value.code;
             return Inf_TRUE;
         }
     }
     if ( inf.bitcounter<8 && !InfBS_LoadNextByte(infptr) ) { return Inf_FALSE; }
     data = decoder->decode8(inf.bitbuffer);
-    if (data.isValid()) {
-        inf.bitbuffer  >>= data.length();
-        inf.bitcounter  -= data.length();
-        (*dest) = data.code();
+    if (data.value.isvalid) {
+        inf.bitbuffer  >>= data.value.length;
+        inf.bitcounter  -= data.value.length;
+        (*dest) = data.value.code;
         return Inf_TRUE;
     }
     if ( inf.bitcounter<16 && !InfBS_LoadNextByte(infptr) ) { return Inf_FALSE; }
     data = decoder->decode16(inf.bitbuffer,data);
-    if (data.isValid()) {
-        inf.bitbuffer >>= data.length();
-        inf.bitcounter -= data.length();
-        (*dest) = data.code();
+    if (data.value.isvalid) {
+        inf.bitbuffer >>= data.value.length;
+        inf.bitcounter -= data.value.length;
+        (*dest) = data.value.code;
         return Inf_TRUE;
     }
     assert( 0 );
