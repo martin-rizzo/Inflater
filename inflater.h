@@ -82,6 +82,12 @@ typedef struct InfData {
     size_t      bufferSize;
 } InfDatabuffer;
 
+typedef union InfHuff {
+    struct value    { unsigned length:15, isvalid:1,  code:15; } value;
+    struct subtable { unsigned   mask:15,   error:1, index:15; } subtable;
+    unsigned raw;
+} InfHuff;
+
 
 typedef void (*InfDataReceiverFunc)(struct Inflater* inflater, const unsigned char* bytes, size_t numberOfBytes);
 typedef void (*InfDataProviderFunc)(struct Inflater* inflater, InfData* data);
@@ -161,11 +167,9 @@ typedef struct Inflater {
     } cl;
 
 
-    
-    PDZip::ReversedHuffmanDecoder* _frontDecoder;     ///< The base decoder used to decode the next 2 decoders (it's crazy!)
-    PDZip::ReversedHuffmanDecoder* _literalDecoder;   ///< The literal+length huffman decoder
-    PDZip::ReversedHuffmanDecoder* _distanceDecoder;  ///< The distance huffman decoder
-
+    const union InfHuff* frontDecoder; ///< The base decoder used to decode the next 2 decoders (it's crazy!)
+    const union InfHuff* literalDecoder;   ///< The literal+length huffman decoder
+    const union InfHuff* distanceDecoder;  ///< The distance huffman decoder
 
 } Inflater;
 
