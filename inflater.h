@@ -33,10 +33,6 @@
 #define INFLATER_H_INCLUDED
 #include <stdlib.h>
 
-namespace PDZip {
-    class ReversedHuffmanDecoder;
-}
-
 #undef  Byte
 #define Byte  unsigned char
 #define InfMinBufferSize    (32*1024)
@@ -62,7 +58,7 @@ typedef enum InfError {
     InfError_Adler32Mismatch = -2,
     InfError_Failed = -1,
     InfError_None = 0
-} InfStatus;
+} InfError;
 
 typedef enum InfAction {
     InfAction_Finish                 = 0,
@@ -80,7 +76,7 @@ typedef int InfBool; ///< Boolean value
 typedef struct InfData {
     const void* buffer;
     size_t      bufferSize;
-} InfDatabuffer;
+} InfData;
 
 typedef union InfHuff {
     struct value    { unsigned length:15, isvalid:1,  code:15; } value;
@@ -89,13 +85,13 @@ typedef union InfHuff {
 } InfHuff;
 
 
+struct Inflater;
 typedef void (*InfDataReceiverFunc)(struct Inflater* inflater, const unsigned char* bytes, size_t numberOfBytes);
 typedef void (*InfDataProviderFunc)(struct Inflater* inflater, InfData* data);
 
 
 typedef struct Inflater {
-    /* PDZip::Inflater* obj; */
-    
+
     int       mode;
     int       flags;
     InfAction action;
