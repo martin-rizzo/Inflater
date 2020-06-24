@@ -11,10 +11,10 @@
 		5B1A70A424A275A8002C19FA /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70A324A275A8002C19FA /* main.c */; };
 		5B1A70A724A275BE002C19FA /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70A624A275BE002C19FA /* main.c */; };
 		5B1A70AA24A275CF002C19FA /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70A924A275CF002C19FA /* main.c */; };
-		5B1A70AD24A275EB002C19FA /* inflater.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70AB24A275EB002C19FA /* inflater.cpp */; };
-		5B1A70AE24A275FE002C19FA /* inflater.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70AB24A275EB002C19FA /* inflater.cpp */; };
-		5B1A70AF24A275FF002C19FA /* inflater.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70AB24A275EB002C19FA /* inflater.cpp */; };
-		5B1A70B024A27600002C19FA /* inflater.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70AB24A275EB002C19FA /* inflater.cpp */; };
+		5B1A70AD24A275EB002C19FA /* inflater.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70AB24A275EB002C19FA /* inflater.c */; };
+		5B1A70AE24A275FE002C19FA /* inflater.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70AB24A275EB002C19FA /* inflater.c */; };
+		5B1A70AF24A275FF002C19FA /* inflater.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70AB24A275EB002C19FA /* inflater.c */; };
+		5B1A70B024A27600002C19FA /* inflater.c in Sources */ = {isa = PBXBuildFile; fileRef = 5B1A70AB24A275EB002C19FA /* inflater.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -65,7 +65,7 @@
 		5B1A70A324A275A8002C19FA /* main.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
 		5B1A70A624A275BE002C19FA /* main.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
 		5B1A70A924A275CF002C19FA /* main.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
-		5B1A70AB24A275EB002C19FA /* inflater.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = inflater.cpp; path = ../../inflater.cpp; sourceTree = "<group>"; };
+		5B1A70AB24A275EB002C19FA /* inflater.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = inflater.c; path = ../../inflater.c; sourceTree = "<group>"; };
 		5B1A70AC24A275EB002C19FA /* inflater.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = inflater.h; path = ../../inflater.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -141,7 +141,7 @@
 			isa = PBXGroup;
 			children = (
 				5B1A70AC24A275EB002C19FA /* inflater.h */,
-				5B1A70AB24A275EB002C19FA /* inflater.cpp */,
+				5B1A70AB24A275EB002C19FA /* inflater.c */,
 				5B1A709F24A2759A002C19FA /* uzo-cpp */,
 				5B1A70A224A275A8002C19FA /* uzo-feed */,
 				5B1A70A524A275BE002C19FA /* uzo-proc */,
@@ -281,7 +281,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5B1A70B024A27600002C19FA /* inflater.cpp in Sources */,
+				5B1A70B024A27600002C19FA /* inflater.c in Sources */,
 				5B1A70A124A2759A002C19FA /* main.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -290,7 +290,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5B1A70AF24A275FF002C19FA /* inflater.cpp in Sources */,
+				5B1A70AF24A275FF002C19FA /* inflater.c in Sources */,
 				5B1A70A424A275A8002C19FA /* main.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -299,7 +299,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5B1A70AE24A275FE002C19FA /* inflater.cpp in Sources */,
+				5B1A70AE24A275FE002C19FA /* inflater.c in Sources */,
 				5B1A70A724A275BE002C19FA /* main.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -308,7 +308,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5B1A70AD24A275EB002C19FA /* inflater.cpp in Sources */,
+				5B1A70AD24A275EB002C19FA /* inflater.c in Sources */,
 				5B1A70AA24A275CF002C19FA /* main.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -416,8 +416,13 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_CW_ASM_SYNTAX = NO;
+				GCC_C_LANGUAGE_STANDARD = ansi;
 				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_ASM_KEYWORD = NO;
+				GCC_ENABLE_CPP_EXCEPTIONS = NO;
+				GCC_ENABLE_CPP_RTTI = NO;
+				GCC_LINK_WITH_DYNAMIC_LIBRARIES = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -426,6 +431,7 @@
 				);
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_PEDANTIC = YES;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
@@ -474,10 +480,16 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_CW_ASM_SYNTAX = NO;
+				GCC_C_LANGUAGE_STANDARD = ansi;
+				GCC_ENABLE_ASM_KEYWORD = NO;
+				GCC_ENABLE_CPP_EXCEPTIONS = NO;
+				GCC_ENABLE_CPP_RTTI = NO;
+				GCC_LINK_WITH_DYNAMIC_LIBRARIES = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_PEDANTIC = YES;
 				GCC_WARN_UNDECLARED_SELECTOR = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;

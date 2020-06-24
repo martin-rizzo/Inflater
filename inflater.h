@@ -49,9 +49,9 @@
 
 
 typedef enum InfError {
-    InfError_BadBlockContent = -8,     ///< The content of block is invalid
-    InfError_BadBlockLength = -7,      ///< The length of block is invalid
-    InfError_BadBlockType = -6,        ///< The type of block is invalid
+    InfError_BadBlockContent = -8,     /**< The content of block is invalid */
+    InfError_BadBlockLength = -7,      /**< The length of block is invalid  */
+    InfError_BadBlockType = -6,        /**< The type of block is invalid    */
     InfError_UnsupportedZLibHeader = -5,
     InfError_BadZLibHeader = -4,
     InfError_BadParameter = -3,
@@ -68,7 +68,7 @@ typedef enum InfAction {
     InfAction_Init                   = 1024
 } InfAction;
 
-typedef int InfBool; ///< Boolean value
+typedef int InfBool; /**< Boolean value */
 #define Inf_FALSE 0
 #define Inf_TRUE  1
 
@@ -105,9 +105,9 @@ typedef struct Inflater {
     
     /* inflaterProcessChunk(..) */
 
-    Byte*       outputChunk;             ///< pointer to the last decompressed chunk of data
-    size_t      outputChunkSize;         ///< number of decompressed bytes in 'outputChunk'
-    size_t      outputBufferContentSize; ///< total number of decompressed bytes in OutputBuffer when 'InfAction_UseOutputBufferContent'
+    Byte*       outputChunk;             /**< pointer to the last decompressed chunk of data  */
+    size_t      outputChunkSize;         /**< number of decompressed bytes in 'outputChunk'   */
+    size_t      outputBufferContentSize; /**< total number of decompressed bytes in OutputBuffer when 'InfAction_UseOutputBufferContent' */
 
     const Byte* inputChunkPtr;
     const Byte* inputChunkEnd;
@@ -127,14 +127,14 @@ typedef struct Inflater {
     int       step;
     
     unsigned _zlibheader;
-    unsigned _zlibheader_method; // < compression method
-    unsigned _zlibheader_wsize;  // < window size
-    unsigned _zlibheader_level;  // < compression level
+    unsigned _zlibheader_method; /**< compression method */
+    unsigned _zlibheader_wsize;  /**< window size        */
+    unsigned _zlibheader_level;  /**< compression level  */
     
     unsigned _lastBlock;
     unsigned _blocktype;
-    unsigned bitbuffer;  ///< bit-stream buffer
-    unsigned bitcounter; ///< number of bits contained in 'bitbuffer'
+    unsigned bitbuffer;  /**< bit-stream buffer                       */
+    unsigned bitcounter; /**< number of bits contained in 'bitbuffer' */
     
     unsigned _hlit;
     unsigned _hdist;
@@ -163,9 +163,9 @@ typedef struct Inflater {
     } cl;
 
 
-    const union InfHuff* frontDecoder; ///< The base decoder used to decode the next 2 decoders (it's crazy!)
-    const union InfHuff* literalDecoder;   ///< The literal+length huffman decoder
-    const union InfHuff* distanceDecoder;  ///< The distance huffman decoder
+    const union InfHuff* frontDecoder;     /**< The base decoder used to decode the next 2 decoders (it's crazy!) */
+    const union InfHuff* literalDecoder;   /**< The literal+length huffman decoder  */
+    const union InfHuff* distanceDecoder;  /**< The distance huffman decoder        */
 
 } Inflater;
 

@@ -1,5 +1,5 @@
 /**
- * @file       inflater.cpp
+ * @file       inflater.c
  * @date       Jun 2, 2020
  * @author     Martin Rizzo | <martinrizzo@gmail.com>
  * @copyright  Copyright (c) 2020 Martin Rizzo.
@@ -40,17 +40,18 @@
 static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
 
-#define Inf_MainTableSize 256    // < 8bits
-#define InfHuffTableSize  (2*1024) // < main-table + all sub-tables
+#define Inf_MainTableSize 256      /**< 8bits                        */
+#define InfHuffTableSize  (2*1024) /**< main-table + all sub-tables  */
 #define Inf_LastValidLength 18
 #define Inf_InvalidLength   24
+#define Inf_MaxNumberOfCodes 19
 #define Inf_CodeLengthTableSize ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
 
 
 #define inf (*infptr)
 
 
-//======================================================================================================================
+/*====================================================================================================================*/
 #   pragma mark - HUFFMAN DECODER
 
 static int CL_getFirstIndex(const unsigned* sourtable) {
@@ -77,43 +78,42 @@ static unsigned CL_getLengthAt(const unsigned* sourtable, int index) {
     return 0x3F & sourtable[index]>>10;
 }
 
-static inline unsigned reversedINC(unsigned huffman, unsigned length) {
+static unsigned reversedINC(unsigned huffman, unsigned length) {
+    unsigned incBit;
     assert( length>0 );
-    unsigned incBit = 1<<(length-1);
-    do { huffman ^= incBit; } while ( (huffman&incBit)==0 && (incBit>>=1)!=0 );
+    incBit = 1<<(length-1); do { huffman ^= incBit; } while ( (huffman&incBit)==0 && (incBit>>=1)!=0 );
     return huffman;
 }
 
-static inline void setWithRepetitions(InfHuff*  table,
-                                      unsigned  availableEntries,
-                                      unsigned  huffman,
-                                      InfHuff   data,
-                                      unsigned  length)
+static void setWithRepetitions(InfHuff*  table,
+                               unsigned  availableEntries,
+                               unsigned  huffman,
+                               InfHuff   data,
+                               unsigned  length)
 {
-    assert( table!=NULL );
-    assert( huffman < (1<<length) );
-    assert( length>=1 );
-    const unsigned unknownStep = (1<<length);
-    for (unsigned unknownBits=0; unknownBits<availableEntries; unknownBits+=unknownStep) {
+    unsigned unknownBits; const unsigned unknownStep = (1<<length);
+    assert( table!=NULL && huffman<(1<<length) && length>=1 );
+    for (unknownBits=0; unknownBits<availableEntries; unknownBits+=unknownStep) {
         table[ unknownBits | huffman ] = data;
     }
 }
 
-static inline int CL_makeSubTable(InfHuff*           subtable,
-                                  int                availableEntries,
-                                  unsigned           firstHuffman,
-                                  unsigned           maxLength,
-                                  const unsigned*    sourtable,
-                                  int                firstIndex,
-                                  int                endIndex)
+static int CL_makeSubTable(InfHuff*           subtable,
+                           int                availableEntries,
+                           unsigned           firstHuffman,
+                           unsigned           maxLength,
+                           const unsigned*    sourtable,
+                           int                firstIndex,
+                           int                endIndex)
 {
-    static const unsigned DiscardedBits = 8; // < number of bits discarded by the subtable
+    static const unsigned DiscardedBits = 8; /**< number of bits discarded by the subtable */
     const int numberOfEntries = 1<<(maxLength-DiscardedBits);
+    unsigned huffman; int index;
     
     assert( numberOfEntries<=availableEntries  );
     
-    unsigned huffman = firstHuffman;
-    int      index   = firstIndex;
+    huffman = firstHuffman;
+    index   = firstIndex;
     while ( index!=endIndex ) {
         const unsigned code   = CL_getCodeAt(sourtable,index);
         const unsigned length = CL_getLengthAt(sourtable,index);
@@ -131,22 +131,22 @@ static inline int CL_makeSubTable(InfHuff*           subtable,
 
 
 const InfHuff* InfHD_load(InfHuff* table, const unsigned int *sourtable) {
-    assert( sourtable!=NULL  );
+    InfHuff invalid, data; int i, index, insertIndex;
+    unsigned huffman, length, maxLength;
+    assert( table!=NULL && sourtable!=NULL  );
     
-    // reset the main-table
-    // std::memset(_table, 0, MainTableSize*sizeof(InfHuff));
-    InfHuff invalid;
+    /* reset the main-table */
     invalid.value.isvalid = 1;
     invalid.value.code    = 0;
     invalid.value.length  = Inf_InvalidLength;
-    for (int i=0; i<Inf_MainTableSize; ++i) { table[i] = invalid; }
+    for (i=0; i<Inf_MainTableSize; ++i) { table[i] = invalid; }
     
-    unsigned huffman = 0;
-    int      index   = CL_getFirstIndex(sourtable);
-    unsigned length  = CL_getLengthAt(sourtable,index);
+    huffman = 0;
+    index   = CL_getFirstIndex(sourtable);
+    length  = CL_getLengthAt(sourtable,index);
 
-    // lengths from 1 to 8
-    // unknown bits are filled with all possible values
+    /* lengths from 1 to 8                              */
+    /* unknown bits are filled with all possible values */
     while ( index!=0 && length<=8 ) {
         InfHuff data;
         data.value.isvalid = 1;
@@ -157,9 +157,9 @@ const InfHuff* InfHD_load(InfHuff* table, const unsigned int *sourtable) {
         index   = CL_getNextIndex(sourtable,index);
         length  = CL_getLengthAt(sourtable,index);
     }
-    // lengths from 9
-    // subtables are created
-    int insertIndex = Inf_MainTableSize;
+    /* lengths from 9         */
+    /* subtables are created  */
+    insertIndex = Inf_MainTableSize;
     while ( index!=0 ) {
         const unsigned firstHuffman = huffman;
         const int      firstIndex   = index;
@@ -169,8 +169,7 @@ const InfHuff* InfHD_load(InfHuff* table, const unsigned int *sourtable) {
             index   = CL_getNextIndex(sourtable,index);
         } while ( index!=0 && (huffman&0xFF)==(firstHuffman&0xFF) );
         
-        const unsigned maxLength = length;
-        InfHuff data;
+        maxLength = length;
         data.subtable.error = 0;
         data.subtable.index = insertIndex;
         data.subtable.mask  = (1<<(maxLength-8))-1;
@@ -189,7 +188,7 @@ const InfHuff* InfHD_load(InfHuff* table, const unsigned int *sourtable) {
     (tmp=table[bitbuffer & 0xFF], tmp.value.isvalid ? tmp : table[ tmp.subtable.index + ((bitbuffer>>8) & tmp.subtable.mask) ])
 
 
-//======================================================================================================================
+/*====================================================================================================================*/
 #   pragma mark - BIT STREAM
 
 /** Loads the next byte (8 bits) from the input stream to the bitbuffer */
@@ -248,7 +247,7 @@ static InfBool InfBS_ReadWord(Inflater* infptr, unsigned* dest) {
 
 /** Read a DWORD (32 bits) from the bitbuffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
 static InfBool InfBS_ReadDWord(Inflater* infptr, unsigned* dest) {
-    static const unsigned numberOfBitsToRead = 32; // < number of bits in a DWord
+    static const unsigned numberOfBitsToRead = 32; /**< number of bits in a DWord */
     const unsigned        bitsToSkip         = (inf.bitcounter%8);
     assert( dest!=NULL && 8*sizeof(*dest)>=numberOfBitsToRead );
     /* skip any padding bits because bitbuffer must be byte aligned before reading a Word */
@@ -263,9 +262,10 @@ static InfBool InfBS_ReadDWord(Inflater* infptr, unsigned* dest) {
 
 /** Reads a sequence of bytes directly from the input stream (bitbuffer must be empty) */
 static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* inout_numberOfBytes) {
+    size_t numberOfBytesToRead, successfulBytes;
     assert( infptr!=NULL && dest!=NULL && inout_numberOfBytes!=NULL && inf.bitcounter==0 );
-    const size_t numberOfBytesToRead = (*inout_numberOfBytes);
-    const size_t successfulBytes     = min( (inf.inputChunkEnd-inf.inputChunkPtr), numberOfBytesToRead );
+    numberOfBytesToRead = (*inout_numberOfBytes);
+    successfulBytes     = min( (inf.inputChunkEnd-inf.inputChunkPtr), numberOfBytesToRead );
     memcpy(dest, inf.inputChunkPtr, successfulBytes);
     inf.inputChunkPtr += successfulBytes;
     (*inout_numberOfBytes) = successfulBytes;
@@ -273,7 +273,7 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 }
 
 
-//======================================================================================================================
+/*====================================================================================================================*/
 #   pragma mark - READING CODE/LENGTHS PAIRS
 
 #define InfCL_Add(code, length)                           \
@@ -286,28 +286,25 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
     }                                                     \
     ++inf.cl.size;
 
-#define InfCL_AddArray(array, arraySize) \
-    for (int i=0; i<arraySize; i++) {    \
-        InfCL_Add(i, array[i]);          \
-    }
-
 static void InfCL_AddRange(Inflater* infptr, int firstCode, int lastCode, unsigned length) {
+    int code;
     assert( infptr!=NULL );
     assert( 0<=firstCode && firstCode<=(Inf_LastValidCode)   );
     assert( 0<=lastCode  &&  lastCode<=(Inf_LastValidCode+1) );
     assert( firstCode<=lastCode );
-    for (int code=firstCode; code<lastCode; ++code) {
+    for (code=firstCode; code<lastCode; ++code) {
         InfCL_Add(code,length);
     }
 }
 
 
 static void InfCL_Open(Inflater* infptr, InfBool resetRepetitions) {
+    int length;
     if (resetRepetitions) { inf.cl.command = inf.cl.length = inf.cl.repetitions = 0; }
     inf.cl.code      = 0;
     inf.cl.size      = 0;
     inf.cl.nextIndex = (Inf_LastValidLength+1);
-    for (int length=0; length<=Inf_LastValidLength; ++length) {
+    for (length=0; length<=Inf_LastValidLength; ++length) {
         *( inf.cl.insertPtr[length] = &inf.cl.table[length] ) = 0;
     }
 }
@@ -328,55 +325,53 @@ static const unsigned* InfCL_Close(Inflater* infptr) {
 }
 
 static InfBool InfCL_ReadCodes(Inflater* infptr, unsigned numberOfCodes) {
-    assert( numberOfCodes>0 );
-    assert( infptr!=NULL );
-    static const unsigned MaximumNumberOfCodes = 19;
-    static const unsigned order[MaximumNumberOfCodes] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
+    static const unsigned order[Inf_MaxNumberOfCodes] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
+    const unsigned end = (numberOfCodes<Inf_MaxNumberOfCodes) ? numberOfCodes : Inf_MaxNumberOfCodes;
+    int i;
+    assert( infptr!=NULL && numberOfCodes>0 );
     
-    const unsigned end = (numberOfCodes<MaximumNumberOfCodes) ? numberOfCodes : MaximumNumberOfCodes;
     while (inf.cl.code<end) {
         unsigned length;
         if ( !InfBS_ReadBits(infptr,&length,3) ) { return Inf_FALSE; }
         inf.cl.lengths[ order[inf.cl.code++] ] = length;
     }
-    while (inf.cl.code<MaximumNumberOfCodes) { inf.cl.lengths[ order[inf.cl.code++] ] = 0; }
-    InfCL_AddArray(inf.cl.lengths, MaximumNumberOfCodes);
+    while (inf.cl.code<Inf_MaxNumberOfCodes) { inf.cl.lengths[ order[inf.cl.code++] ] = 0; }
+    for (i=0; i<Inf_MaxNumberOfCodes; i++) { InfCL_Add(i, inf.cl.lengths[i]);  }
     return Inf_TRUE;
 }
 
 static InfBool InfCL_ReadCompressedCodes(Inflater* infptr, unsigned numberOfCodes,  const InfHuff* table) {
-    assert( numberOfCodes>0 );
-    assert( infptr!=NULL );
-    static const unsigned MaxValidLength = 15; // < the maximum length that can be read
     enum Command {
-        Command_ReadNext            = 0,  // < load next command
-        Command_CopyPreviousLength  = 16, // < repeat the previous length
-        Command_RepeatZeroLength_3  = 17, // < repeat zero length (3 or more times)
-        Command_RepeatZeroLength_11 = 18  // < repeat zero length (11 or more times)
+        Command_ReadNext            = 0,  /**< load next command                             */
+        Command_UseCommandAsLength  = 15, /**< length is the value stored in 'infcl.command' */
+        Command_CopyPreviousLength  = 16, /**< repeat the previous length                    */
+        Command_RepeatZeroLength_3  = 17, /**< repeat zero length (3 or more times)          */
+        Command_RepeatZeroLength_11 = 18  /**< repeat zero length (11 or more times)         */
     };
     unsigned value = 0;
+    assert( infptr!=NULL && numberOfCodes>0 && table!=NULL );
 
-    // IMPORTANT: add any repetition that is pending from a previous load (ex: literals-table > distance-table)
+    /* IMPORTANT: add any repetition that is pending from a previous load (ex: literals-table > distance-table) */
     while (inf.cl.code<numberOfCodes && inf.cl.repetitions>0) {
         InfCL_Add(inf.cl.code, inf.cl.length);
         ++inf.cl.code; --inf.cl.repetitions;
     }
     
-    // add (one by one) all codes with their codeLengths taking into account the number of repetitions
+    /* add (one by one) all codes with their codeLengths taking into account the number of repetitions */
     while ( inf.cl.code<numberOfCodes ) {
         assert( inf.cl.repetitions==0 );
         
-        // read a new command
+        /* read a new command */
         if ( inf.cl.command==Command_ReadNext ) {
             if ( !InfBS_ReadCompressedBits(infptr, &inf.cl.command, table) ) { return Inf_FALSE; }
         }
-        // process simple command
-        if ( inf.cl.command<=MaxValidLength ) {
+        /* process simple command */
+        if ( inf.cl.command<=Command_UseCommandAsLength ) {
             inf.cl.length=inf.cl.command;
             InfCL_Add(inf.cl.code, inf.cl.length);
             ++inf.cl.code;
         }
-        // process command with repetition
+        /* process command with repetition */
         else {
             switch (inf.cl.command) {
                 case Command_CopyPreviousLength:
@@ -403,7 +398,7 @@ static InfBool InfCL_ReadCompressedCodes(Inflater* infptr, unsigned numberOfCode
                 ++inf.cl.code; --inf.cl.repetitions;
             }
         }
-        // mark current command as finished
+        /* mark current command as finished */
         inf.cl.command = Command_ReadNext;
     }
     return Inf_TRUE;
@@ -411,7 +406,7 @@ static InfBool InfCL_ReadCompressedCodes(Inflater* infptr, unsigned numberOfCode
 
 
 
-//======================================================================================================================
+/*====================================================================================================================*/
 #   pragma mark - ???
 
 
@@ -428,9 +423,9 @@ typedef enum InfFlags {
 } InfFlags;
 
 typedef enum BlockType {
-    BlockType_Uncompressed = 0,
-    BlockType_FixedHuffman = 1,
-    BlockType_DynamicHuffman = 2,
+    BlockType_Uncompressed   = 0,
+    BlockType_FixedHuffman   = 1,
+    BlockType_DynamicHuffman = 2
 } BlockType;
 
 
@@ -492,18 +487,6 @@ static InfHuff* getFixedLiteralDecoder(Inflater* infptr) {
         InfHD_load(table, InfCL_Close(infptr) );
     }
     return table;
-/*
-    static PDZip::ReversedHuffmanDecoder decoder;
-    if ( !decoder.isLoaded() ) {
-        InfCL_Open(infptr, Inf_TRUE);
-        InfCL_AddRange(infptr,   0,144, 8);
-        InfCL_AddRange(infptr, 144,256, 9);
-        InfCL_AddRange(infptr, 256,280, 7);
-        InfCL_AddRange(infptr, 280,288, 8);
-        decoder.load( InfCL_Close(infptr) );
-    }
-    return &decoder;
-*/
 }
 
 static InfHuff* getFixedDistanceDecoder(Inflater* infptr) {
@@ -516,15 +499,6 @@ static InfHuff* getFixedDistanceDecoder(Inflater* infptr) {
         InfHD_load(table, InfCL_Close(infptr) );
     }
     return table;
-/*
-    static PDZip::ReversedHuffmanDecoder decoder;
-    if ( !decoder.isLoaded() ) {
-        InfCL_Open(infptr, Inf_TRUE);
-        InfCL_AddRange(infptr, 0,32, 5);
-        decoder.load( InfCL_Close(infptr) );
-    }
-    return &decoder;
-*/
 }
 
 
@@ -552,13 +526,6 @@ InfAction Inf_decompress(Inflater*                  infptr,
                          unsigned char* const       outputBufferBegin,
                          size_t                     outputBufferSize)
 {
-    assert( inf.inputChunkPtr!=NULL );
-    assert( inf.inputChunkPtr<inf.inputChunkEnd );
-    assert( outputPtr!=NULL );
-    assert( inout_outputBytes!=NULL && (*inout_outputBytes)>0 );
-    assert( outputBufferBegin!=NULL );
-    assert( outputBufferSize>=(32*1024) );
-
     static const unsigned int lengthStarts[] = {
          3,  4,  5,  6,  7,  8,  9,  10,  11,  13,  15,  17,  19,  23,  27,  31,
         35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
@@ -574,27 +541,35 @@ InfAction Inf_decompress(Inflater*                  infptr,
         7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
         12, 12, 13, 13};
 
+    unsigned       temp;
+    size_t         numberOfBytes;
+    InfBool        canReadAll;
+    unsigned char* sequencePtr;
+    InfStep step;
+    InfAction exit_status;
+
     unsigned char* const writeEnd = outputPtr + (*inout_outputBytes);
     unsigned char*       writePtr = outputPtr;
 
-    unsigned       temp;
-    size_t         numberOfBytes;
-    bool           canReadAll;
-    unsigned char* sequencePtr;
-    
-    
-    InfStep   step        = (InfStep)inf.step;
-    InfAction exit_status = (InfAction)(step!=InfStep_End && step!=InfStep_FatalError ? InfAction_ProcessNextChunk : InfError_Failed);
+    assert( inf.inputChunkPtr!=NULL );
+    assert( inf.inputChunkPtr<inf.inputChunkEnd );
+    assert( outputPtr!=NULL );
+    assert( inout_outputBytes!=NULL && (*inout_outputBytes)>0 );
+    assert( outputBufferBegin!=NULL );
+    assert( outputBufferSize>=(32*1024) );
+
+    step        = (InfStep)inf.step;
+    exit_status = (InfAction)(step!=InfStep_End && step!=InfStep_FatalError ? InfAction_ProcessNextChunk : InfError_Failed);
     while ( exit_status==InfAction_ProcessNextChunk ) {
         switch (step) {
                 
             case InfStep_Start:
-                inf._lastBlock = false;
+                inf._lastBlock = Inf_FALSE;
                 op_fallthrough(InfStep_ReadZLibHeader);
                 
-            //-------------------------------------------------------------------------------------
-            // infstep: READ_ZLIB_HEADER
-            //
+            /*-------------------------------------------------------------------------------------
+             * infstep: READ_ZLIB_HEADER
+             */
             case InfStep_ReadZLibHeader:
                 if ( !InfBS_ReadWord(infptr,&inf._zlibheader) ) { op_return(InfAction_FillInputBuffer); }
                 op_fallthrough(InfStep_ReadZLibHeader2);
@@ -607,12 +582,12 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 if (inf._zlibheader_method!=8)       { op_fatal_error(InfError_UnsupportedZLibHeader); }
                 if (inf._zlibheader&0x20)            { op_fatal_error(InfError_UnsupportedZLibHeader); }
                 if (inf._zlibheader_wsize>(32*1024)) { op_fatal_error(InfError_UnsupportedZLibHeader); }
-                //if (_zlibheader_wsize>wrappingBufferSize) { op_fatal_error(Status_UnsupportedZLibHeader); }
+                /* if (_zlibheader_wsize>wrappingBufferSize) { op_fatal_error(Status_UnsupportedZLibHeader); } */
                 op_fallthrough(InfStep_ProcessNextBlock);
                 
-            //-------------------------------------------------------------------------------------
-            // infstep: READ_BLOCK_HEADER
-            //
+            /*-------------------------------------------------------------------------------------
+             * infstep: READ_BLOCK_HEADER
+             */
             case InfStep_ProcessNextBlock:
                 if (inf._lastBlock) {
                     printf(" > END OF STREAM\n\n");
@@ -639,9 +614,9 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 printf(" > Fatal Error (Bad Block Type)\n");
                 op_fatal_error(InfError_BadBlockType);
                 
-            //-------------------------------------------------------------------------------------
-            // Process_UncompressedBlock
-            //
+            /*-------------------------------------------------------------------------------------
+             * Process_UncompressedBlock
+             */
             case InfStep_Process_UncompressedBlock:
                 if ( !InfBS_ReadDWord(infptr,&temp) ) { op_return(InfAction_FillInputBuffer); }
                 inf._seq_len = (temp >> 16);
@@ -659,17 +634,17 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 assert( inf._seq_len==0 );
                 op_goto(InfStep_ProcessNextBlock);
 
-            //-------------------------------------------------------------------------------------
-            // Load FixedHuffmanDecoders
-            //
+            /*-------------------------------------------------------------------------------------
+             * Load FixedHuffmanDecoders
+             */
             case InfStep_Load_FixedHuffmanDecoders:
                 inf.literalDecoder  = getFixedLiteralDecoder (infptr);
                 inf.distanceDecoder = getFixedDistanceDecoder(infptr);
                 op_goto(InfStep_Process_CompressedBlock);
                 
-            //-------------------------------------------------------------------------------------
-            // Load DynamicHuffmanDecoders
-            //
+            /*-------------------------------------------------------------------------------------
+             * Load DynamicHuffmanDecoders
+             */
             case InfStep_Load_DynamicHuffmanDecoders:
                 if ( !InfBS_ReadBits(infptr,&temp,5+5+4) ) { op_return(InfAction_FillInputBuffer); }
                 inf._hlit  = temp     & 0x1F;
@@ -677,9 +652,9 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 inf._hclen = temp>>10 & 0x0F;
                 op_fallthrough(InfStep_Load_FrontHuffmanTable);
 
-            //----------------------------------
-            // load "front" huffman table
-            //
+            /*----------------------------------
+             * load "front" huffman table
+             */
             case InfStep_Load_FrontHuffmanTable:
                 InfCL_Open(infptr,Inf_TRUE);
                 op_fallthrough(InfStep_Load_FrontHuffmanTable2);
@@ -689,9 +664,9 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 inf.frontDecoder = InfHD_load(huffmanTable0, InfCL_Close(infptr));
                 op_fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
-            //----------------------------------
-            // load literal-length huffman table
-            //
+            /*----------------------------------
+             * load literal-length huffman table
+             */
             case InfStep_Load_LiteralHuffmanTable:
                 InfCL_Open(infptr,Inf_TRUE);
                 op_fallthrough(InfStep_Load_LiteralHuffmanTable2);
@@ -701,9 +676,9 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 inf.literalDecoder = InfHD_load(huffmanTable1, InfCL_Close(infptr));
                 op_fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
-            //----------------------------------
-            // load distance huffman table
-            //
+            /*----------------------------------
+             * load distance huffman table
+             */
             case InfStep_Load_DistanceHuffmanTable:
                 InfCL_Open(infptr,Inf_FALSE);
                 op_fallthrough(InfStep_Load_DistanceHuffmanTable2);
@@ -713,9 +688,9 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 inf.distanceDecoder = InfHD_load(huffmanTable2, InfCL_Close(infptr));
                 op_fallthrough(InfStep_Process_CompressedBlock);
                 
-            //-------------------------------------------------------------------------------------
-            // Process Compressed Block
-            //
+            /*-------------------------------------------------------------------------------------
+             * Process Compressed Block
+             */
             case InfStep_Process_CompressedBlock:
             case InfStep_Read_LiteralOrLength:
                 if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf.literalDecoder) ) { op_return(InfAction_FillInputBuffer); }
@@ -752,29 +727,29 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 assert( inf._seq_dist<(32*1024) );
                 op_fallthrough(InfStep_Output_RepeatedSequence);
 
-            //-------------------------------------------------------------------------------------
-            // Output_RepeatedSequence
-            //
-            //         outputBegin     writePtr                      writeEnd
-            //              V             V                             V
-            // <... ghost > # [[ straight * overlapped  ...... ghost ]] #
-            //
+            /*-------------------------------------------------------------------------------------
+             * Output_RepeatedSequence
+             *
+             *         outputBegin     writePtr                      writeEnd
+             *              V             V                             V
+             * <... ghost > # [[ straight * overlapped  ...... ghost ]] #
+             */
             case InfStep_Output_RepeatedSequence:
                 sequencePtr = writePtr - inf._seq_dist;
                 if (sequencePtr<outputBufferBegin) {
                     sequencePtr += outputBufferSize;
-                    //-- copy bytes ---
+                    /*-- copy bytes ---*/
                     inf._seq_len -= numberOfBytes = min( inf._seq_len, (writeEnd-sequencePtr) );
                     memmove( writePtr, sequencePtr, numberOfBytes ); writePtr+=numberOfBytes;
-                    //-----------------
+                    /*-----------------*/
                     if ( inf._seq_len==0 ) { op_goto(InfStep_Read_LiteralOrLength); }
                     if ( writePtr==writeEnd )  { op_return(InfAction_UseOutputBufferContent); }
                     sequencePtr = outputBufferBegin;
                 }
-                //-- copy bytes ---
+                /*-- copy bytes ---*/
                 inf._seq_len -= numberOfBytes = min( inf._seq_len, (writeEnd-writePtr) );
                 while ( numberOfBytes-->0 ) { *writePtr++ = *sequencePtr++; }
-                //-----------------
+                /*-----------------*/
                 if ( inf._seq_len==0 ) { op_goto(InfStep_Read_LiteralOrLength); }
                 if ( writePtr==writeEnd )  { op_return(InfAction_UseOutputBufferContent); }
                 op_fatal_error(InfError_BadBlockContent);
@@ -985,7 +960,8 @@ size_t inflaterTake(Inflater* inf, void* decompressedData, size_t decompressedDa
         if ( fillInputBuffer ) {
             /* get compressed data from the data provider (when required) */
             if (inf->action==InfAction_Init || inf->action==InfAction_FillInputBuffer) {
-                inf->dataProviderFunc(inf, &(inf->providedData=inf->helperInput) );
+                inf->providedData=inf->helperInput;
+                inf->dataProviderFunc(inf, &inf->providedData );
                 if ( inf->providedData.bufferSize==0 ) { break; }
             }
             /* decompress the provided data and generate more sourAvailableBytes */
