@@ -13,11 +13,20 @@
 #define INFLATER_IMPLEMENTATION
 #include "inflater.h"
 
+typedef struct FileHeader {
+    int    compressionMethod;
+    size_t compressedSize;
+    size_t uncompressedSize;
+    long   contentPosition;
+    char   fileName[1];
+} FileHeader;
 
 #define CHUNK_SIZE 512
 
+#define getWord(ptr)  ( (ptr)[0] | (ptr)[1]<<8 )
+#define getDWord(ptr) ( (ptr)[0] | (ptr)[1]<<8 | (ptr)[2]<<16 | (ptr)[3]<<24 )
 
-#define isSequenceEqual(ptr1, ptr2, numberOfBytes) ( ptr1[0]==ptr2[0] && 0==memcmp(ptr1,ptr2,numberOfBytes) )
+#define isSequenceEqual(ptr1, ptr2, numberOfBytes) ( (ptr1)[0]==(ptr2)[0] && 0==memcmp((ptr1),(ptr2),(numberOfBytes)) )
 
 static long getFileSize(FILE* file) { fseek(file,0,SEEK_END);  return ftell(file); }
 
@@ -58,22 +67,79 @@ long reverseFindInFile(FILE* file, size_t numberOfBytesToSearch, const char* seq
 }
 
 
-void getFirstCompressedFile(FILE* zipFile) {
-    long position;
-    static const char eocdSignature[4] = { 0x50, 0x4B, 0x05, 0x06 };
-    position = reverseFindInFile(zipFile,65536, eocdSignature,sizeof(eocdSignature));
-    printf("EndOfDirectory position = %ld\n", position);
+long getFirstFileHeaderPosition(FILE* zipFile) {
+    static const char eocdSignature[4] = { 0x50, 0x4B, 0x05, 0x06 }; /* 'end of central directory' signature      */
+    static const char cdfhSignature[4] = { 0x50, 0x4B, 0x01, 0x02 }; /* 'central directory file header' signature */
+    long eocdPosition, filePosition; unsigned char eocd[20], cdfh[46]; /* end of central directory */
+    unsigned numberOfRecords, fileDisk; long offsetOfDirectory;
+
+    /* load the 'end-of-central-directory' record */
+    eocdPosition = reverseFindInFile(zipFile,65536, eocdSignature,sizeof(eocdSignature));
+    if (eocdPosition<0) { return -1; }
+    fseek(zipFile, eocdPosition, SEEK_SET);
+    if ( sizeof(eocd)!=fread(eocd, 1, sizeof(eocd), zipFile) ) { return -1; }
+    
+    /* read */
+    if ( !isSequenceEqual(eocd, eocdSignature, sizeof(eocdSignature)) ) { return -1; }
+    numberOfRecords   = getWord (&eocd[ 8]);
+    offsetOfDirectory = getDWord(&eocd[16]);
+    printf("number of records  : %d\n",  numberOfRecords  );
+    printf("offset of directory: %ld\n", offsetOfDirectory);
+    
+    /* load the 'central-cirectory-file-header' record */
+    if (numberOfRecords<1) { return -1; }
+    fseek(zipFile, offsetOfDirectory, SEEK_SET);
+    if ( sizeof(cdfh)!=fread(cdfh, 1, sizeof(cdfh), zipFile) ) { return -1; }
+    
+    /* read */
+    if ( !isSequenceEqual(cdfh, cdfhSignature, sizeof(cdfhSignature)) ) { return -1; }
+    fileDisk     = getWord (&cdfh[34]);
+    filePosition = getDWord(&cdfh[42]);
+    
+    return filePosition;
+}
+
+FileHeader* allocFirstFileHeader(FILE* zipFile) {
+    static const char lfhSignature[4] = { 0x50, 0x4B, 0x03, 0x04 }; /* 'local file header' signature */
+    unsigned char lfh[30];
+    int fileNameLength, extraFieldLength;
+    FileHeader* fileHeader = NULL;
+    long fileHeaderPosition;
+    assert( zipFile!=NULL );
+    
+    /* load the 'file-header' record */
+    fileHeaderPosition = getFirstFileHeaderPosition(zipFile);
+    if (fileHeaderPosition<0) { return NULL; }
+    fseek(zipFile, fileHeaderPosition, SEEK_SET);
+    if ( fread(lfh, sizeof(lfh), 1, zipFile)!=1 ) { return NULL; }
+    
+    /* read */
+    if ( !isSequenceEqual(lfh, lfhSignature, sizeof(lfhSignature)) ) { return NULL; }
+    fileNameLength   = getWord(&lfh[26]);
+    extraFieldLength = getWord(&lfh[28]);
+    fileHeader = malloc(sizeof(FileHeader)+fileNameLength+1);
+    fileHeader->compressionMethod = getWord (&lfh[ 8]);
+    fileHeader->compressedSize    = getDWord(&lfh[18]);
+    fileHeader->uncompressedSize  = getDWord(&lfh[22]);
+    fileHeader->contentPosition   = fileHeaderPosition+30+fileNameLength+extraFieldLength;
+    if ( fread(fileHeader->fileName, fileNameLength, 1,zipFile)!=1 ) { return NULL; }
+    fileHeader->fileName[fileNameLength]='\0';
+    
+    return fileHeader;
 }
 
 void unzipFirstFile(const char* zipFilePath) {
-    FILE* zipFile;
+    FILE* zipFile; FileHeader* fileHeader;
     assert( zipFilePath!=NULL && zipFilePath[0]!='\0' );
     
     zipFile = fopen(zipFilePath, "rb");
     if (zipFile==NULL) { return; }
     
-    getFirstCompressedFile(zipFile);
-        
+    
+    fileHeader = allocFirstFileHeader(zipFile);
+    printf("Inflating \"%s\"\n", fileHeader->fileName);
+    
+    free(fileHeader);
     fclose(zipFile);
 }
 
