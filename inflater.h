@@ -97,8 +97,6 @@ typedef struct Inflater {
     InfAction action;
     InfError  error;
     
-    int finished; /* << HACK!!!  */
-    
     void*               userPtr;
     InfDataProviderFunc dataProviderFunc;
     InfDataReceiverFunc dataReceiverFunc;

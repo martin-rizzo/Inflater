@@ -555,6 +555,10 @@ InfAction Inf_decompress(Inflater*                  infptr,
              */
             case InfStep_ProcessNextBlock:
                 if (inf._lastBlock) {
+                    if (writePtr > outputPtr) {
+                        printf(" > END (use remaining output buffer)\n");
+                        op_return(InfAction_UseOutputBufferContent);
+                    }
                     printf(" > END OF STREAM\n\n");
                     op_end(InfAction_Finish);
                 }
@@ -745,17 +749,10 @@ InfAction Inf_decompress(Inflater*                  infptr,
 Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
     Inflater* inf = (Inflater*)malloc(sizeof(Inflater));
     
-    /*
-    inf->obj = new PDZip::Inflater;
-    inf->obj->init();
-    */
-    
     inf->mode            = InfMode_Uninitialized;
     inf->flags           = InfFlags_FreeItself;
     inf->action          = InfAction_Init;
     inf->error           = InfError_None;
-    
-    inf->finished = 0;
     
     inf->userPtr          = NULL;
     inf->dataProviderFunc = NULL;
@@ -815,10 +812,6 @@ InfAction inflaterProcessChunk(Inflater*   inflater,
     assert( inputBuffer !=NULL && inputBufferSize >0 );
     assert( outputBuffer!=NULL && outputBufferSize>0 );
     
-    if (inflater->finished) {
-        inflater->action=InfAction_Finish;
-    }
-    
     switch ( inflater->action ) {
             
         case InfAction_Init:
@@ -859,11 +852,6 @@ InfAction inflaterProcessChunk(Inflater*   inflater,
                             (unsigned char*)outputBuffer, outputBufferSize);
     
     
-    /* hack to add an 'UseOutputBufferContent' before 'Finish' */
-    inflater->finished = (inflater->action==InfAction_Finish);
-    if (inflater->finished && inflater->outputChunkSize>0) {
-        inflater->action=InfAction_UseOutputBufferContent;
-    }
     return inflater->action;
 }
 
