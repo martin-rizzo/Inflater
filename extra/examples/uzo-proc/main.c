@@ -18,7 +18,8 @@ typedef struct FileHeader {
     size_t compressedSize;
     size_t uncompressedSize;
     long   contentPosition;
-    char   fileName[1];
+    char*  name;
+    char   fullPath[1];
 } FileHeader;
 
 #define CHUNK_SIZE 512
@@ -31,6 +32,10 @@ typedef struct FileHeader {
 static long getFileSize(FILE* file) { fseek(file,0,SEEK_END);  return ftell(file); }
 
 static long min(long a, long b) { return a<b ? a : b; }
+
+
+/*=================================================================================================================*/
+#pragma mark - > ACCESSING THE ZIP DIRECTORY
 
 /**
  * Finds the position of a sequence of bytes in the provided file
@@ -102,7 +107,8 @@ long getFirstFileHeaderPosition(FILE* zipFile) {
 FileHeader* allocFirstFileHeader(FILE* zipFile) {
     static const char lfhSignature[4] = { 0x50, 0x4B, 0x03, 0x04 }; /* 'local file header' signature */
     unsigned char lfh[30];
-    int fileNameLength, extraFieldLength;
+    char* ptr;
+    int fullPathLength, extraFieldLength;
     FileHeader* fileHeader = NULL;
     long fileHeaderPosition;
     assert( zipFile!=NULL );
@@ -115,30 +121,70 @@ FileHeader* allocFirstFileHeader(FILE* zipFile) {
     
     /* read */
     if ( !isSequenceEqual(lfh, lfhSignature, sizeof(lfhSignature)) ) { return NULL; }
-    fileNameLength   = getWord(&lfh[26]);
+    fullPathLength   = getWord(&lfh[26]);
     extraFieldLength = getWord(&lfh[28]);
-    fileHeader = malloc(sizeof(FileHeader)+fileNameLength+1);
+    fileHeader = malloc(sizeof(FileHeader)+fullPathLength+1);
     fileHeader->compressionMethod = getWord (&lfh[ 8]);
     fileHeader->compressedSize    = getDWord(&lfh[18]);
     fileHeader->uncompressedSize  = getDWord(&lfh[22]);
-    fileHeader->contentPosition   = fileHeaderPosition+30+fileNameLength+extraFieldLength;
-    if ( fread(fileHeader->fileName, fileNameLength, 1,zipFile)!=1 ) { return NULL; }
-    fileHeader->fileName[fileNameLength]='\0';
-    
+    fileHeader->contentPosition   = fileHeaderPosition+30+fullPathLength+extraFieldLength;
+    if ( fread(fileHeader->fullPath, fullPathLength, 1,zipFile)!=1 ) { return NULL; }
+    fileHeader->fullPath[fullPathLength]='\0';
+    fileHeader->name = fileHeader->fullPath;
+    for (ptr=fileHeader->fullPath; *ptr!='\0'; ++ptr) {
+        if (*ptr=='/' || *ptr=='\\') { fileHeader->name = (ptr+1); }
+    }
     return fileHeader;
 }
 
+/*=================================================================================================================*/
+#pragma mark - > DECOMPRESSING
+
+void inflateFile(FILE* zipFile, const char* fileName, long fileContentPosition) {
+    size_t outputBufferSize = 65536;
+    size_t inputBufferSize  = 65536;
+    char *outputBuffer, *inputBuffer; FILE* outputFile;
+    Inflater* inflater; InfAction action;
+    assert( zipFile!=NULL && fileName!=NULL && fileContentPosition>0 );
+    
+    outputBuffer = malloc(outputBufferSize);
+    inputBuffer  = malloc(inputBufferSize);
+    outputFile   = fopen(fileName, "wb");
+    inflater     = inflaterCreate(0,0);
+    if (outputBuffer!=NULL && inputBuffer!=NULL && outputFile!=NULL && inflater!=NULL ) {
+        
+        fseek(zipFile, fileContentPosition, SEEK_SET );
+        inputBufferSize = fread(inputBuffer, 1, inputBufferSize, zipFile);
+        
+        action = InfAction_Init;
+        while ( action != InfAction_Finish ) {
+            action = inflaterProcessChunk(inflater, outputBuffer, outputBufferSize, inputBuffer, inputBufferSize);
+            if ( action == InfAction_FillInputBuffer ) {
+                inputBufferSize = fread(inputBuffer, 1, inputBufferSize, zipFile);
+            }
+            if ( action == InfAction_UseOutputBufferContent ) {
+                fwrite(outputBuffer, 1, inflater->outputBufferContentSize, outputFile);
+            }
+        }
+    }
+    inflaterDestroy(inflater);
+    fclose(outputFile);
+    free(inputBuffer);
+    free(outputBuffer);
+}
+
 void unzipFirstFile(const char* zipFilePath) {
-    FILE* zipFile; FileHeader* fileHeader;
+    FILE *zipFile; FileHeader* fileHeader;
     assert( zipFilePath!=NULL && zipFilePath[0]!='\0' );
     
     zipFile = fopen(zipFilePath, "rb");
     if (zipFile==NULL) { return; }
     
-    
     fileHeader = allocFirstFileHeader(zipFile);
-    printf("Inflating \"%s\"\n", fileHeader->fileName);
-    
+    if (fileHeader->compressionMethod==8) {
+        printf("Inflating \"%s\"\n", fileHeader->name);
+        inflateFile(zipFile, fileHeader->name, fileHeader->contentPosition);
+    }
     free(fileHeader);
     fclose(zipFile);
 }
