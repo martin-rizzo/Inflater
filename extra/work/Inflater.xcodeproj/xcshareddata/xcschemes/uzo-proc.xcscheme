@@ -54,7 +54,11 @@
       </BuildableProductRunnable>
       <CommandLineArguments>
          <CommandLineArgument
-            argument = "main.c.zip"
+            argument = "main.zip"
+            isEnabled = "NO">
+         </CommandLineArgument>
+         <CommandLineArgument
+            argument = "dice.zip"
             isEnabled = "YES">
          </CommandLineArgument>
       </CommandLineArguments>
