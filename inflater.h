@@ -126,11 +126,6 @@ typedef struct Inflater {
     /* HIDDEN: decompress */
     int       step;
     
-    unsigned _zlibheader;
-    unsigned _zlibheader_method; /**< compression method */
-    unsigned _zlibheader_wsize;  /**< window size        */
-    unsigned _zlibheader_level;  /**< compression level  */
-    
     unsigned _lastBlock;
     unsigned _blocktype;
     unsigned bitbuffer;  /**< bit-stream buffer                       */

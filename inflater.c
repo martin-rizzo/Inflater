@@ -230,21 +230,6 @@ static InfBool InfBS_ReadCompressedBits(Inflater* infptr, unsigned* dest, const 
     return Inf_TRUE;
 }
 
-/** Reads a WORD (16 bits) from the bitbuffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
-static InfBool InfBS_ReadWord(Inflater* infptr, unsigned* dest) {
-    static const unsigned numberOfBitsToRead = 16;
-    const unsigned        bitsToSkip         = (inf.bitcounter%8);
-    assert( dest!=NULL && 8*sizeof(*dest)>=numberOfBitsToRead );
-    /* skip any padding bits because bitbuffer must be byte aligned before reading a Word */
-    inf.bitbuffer  >>= bitsToSkip;
-    inf.bitcounter  -= bitsToSkip;
-    while ( inf.bitcounter <numberOfBitsToRead ) { if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; } }
-    assert( inf.bitcounter==numberOfBitsToRead );
-    (*dest) = (inf.bitbuffer>>8 & 0x00FF) | (inf.bitbuffer<<8 & 0xFF00);
-    inf.bitbuffer = inf.bitcounter = 0;
-    return Inf_TRUE;
-}
-
 /** Read a DWORD (32 bits) from the bitbuffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
 static InfBool InfBS_ReadDWord(Inflater* infptr, unsigned* dest) {
     static const unsigned numberOfBitsToRead = 32; /**< number of bits in a DWord */
@@ -437,8 +422,6 @@ typedef enum BlockType {
     
 typedef enum InfStep {
     InfStep_Start,
-    InfStep_ReadZLibHeader,
-    InfStep_ReadZLibHeader2,
     InfStep_ProcessNextBlock,
     InfStep_ReadBlockHeader,
     
@@ -546,7 +529,7 @@ InfAction Inf_decompress(Inflater*                  infptr,
     InfBool        canReadAll;
     unsigned char* sequencePtr;
     InfStep step;
-    InfAction exit_status;
+    int     exit_status;
 
     unsigned char* const writeEnd = outputPtr + (*inout_outputBytes);
     unsigned char*       writePtr = outputPtr;
@@ -565,24 +548,6 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 
             case InfStep_Start:
                 inf._lastBlock = Inf_FALSE;
-                op_fallthrough(InfStep_ReadZLibHeader);
-                
-            /*-------------------------------------------------------------------------------------
-             * infstep: READ_ZLIB_HEADER
-             */
-            case InfStep_ReadZLibHeader:
-                if ( !InfBS_ReadWord(infptr,&inf._zlibheader) ) { op_return(InfAction_FillInputBuffer); }
-                op_fallthrough(InfStep_ReadZLibHeader2);
-                
-            case InfStep_ReadZLibHeader2:
-                if ( (inf._zlibheader % 31)!=0 ) { op_fatal_error(InfError_BadZLibHeader); }
-                inf._zlibheader_method = inf._zlibheader>>8 & 0x0F;
-                inf._zlibheader_wsize  = 1 << (8 + (inf._zlibheader>>12 & 0x0F));
-                inf._zlibheader_level  = inf._zlibheader>>6 & 0x03;
-                if (inf._zlibheader_method!=8)       { op_fatal_error(InfError_UnsupportedZLibHeader); }
-                if (inf._zlibheader&0x20)            { op_fatal_error(InfError_UnsupportedZLibHeader); }
-                if (inf._zlibheader_wsize>(32*1024)) { op_fatal_error(InfError_UnsupportedZLibHeader); }
-                /* if (_zlibheader_wsize>wrappingBufferSize) { op_fatal_error(Status_UnsupportedZLibHeader); } */
                 op_fallthrough(InfStep_ProcessNextBlock);
                 
             /*-------------------------------------------------------------------------------------
@@ -769,7 +734,7 @@ InfAction Inf_decompress(Inflater*                  infptr,
     inf.error                    = exit_status <0 ? (InfError )exit_status : InfError_None;
     
     printf(" # exit_stats = %d\n", exit_status);
-    return exit_status;
+    return inf.action;
 }
 
 #undef inf
