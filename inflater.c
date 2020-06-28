@@ -414,11 +414,11 @@ typedef enum BlockType {
 } BlockType;
 
 
-#   define op_goto(dest_step)        step=dest_step; break;
-#   define op_fallthrough(next_step) step=next_step;
-#   define op_return(x)                                       exit_status=x; break;
-#   define op_end(x)                 step=InfStep_End;        exit_status=x; break;
-#   define op_fatal_error(x)         step=InfStep_FatalError; exit_status=(InfAction)x; break;
+#define inf_FallThrough(next_step) step=next_step;
+#define inf_Goto(dest_step)        step=dest_step;                                                      break;
+#define inf_Return(act)                                     inf.action=act;                             break;
+#define inf_Finish(act)            step=InfStep_End;        inf.action=InfAction_Finish;                break;
+#define inf_FatalError(err)        step=InfStep_FatalError; inf.action=InfAction_Finish; inf.error=err; break;
     
 typedef enum InfStep {
     InfStep_Start,
@@ -519,7 +519,6 @@ InfAction Inf_decompress(Inflater*                  infptr,
     InfBool        canReadAll;
     unsigned char* sequencePtr;
     InfStep step;
-    int     exit_status;
 
     unsigned char* const writeEnd = (outputBufferBegin + outputBufferSize);
     unsigned char*       writePtr = inf.outputChunk;
@@ -529,15 +528,17 @@ InfAction Inf_decompress(Inflater*                  infptr,
     assert( inf.outputChunk!=NULL && inf.outputChunk<(outputBufferBegin+outputBufferSize) );
     assert( outputBufferBegin!=NULL );
     assert( outputBufferSize>=(32*1024) );
-
-    step        = (InfStep)inf.step;
-    exit_status = (InfAction)(step!=InfStep_End && step!=InfStep_FatalError ? InfAction_ProcessNextChunk : InfError_Failed);
-    while ( exit_status==InfAction_ProcessNextChunk ) {
+    
+    step = (InfStep)inf.step;
+    if (step==InfStep_End || step==InfStep_FatalError) { return inf.action; }
+    
+    inf.action=InfAction_ProcessNextChunk;
+    while ( inf.action==InfAction_ProcessNextChunk ) {
         switch (step) {
                 
             case InfStep_Start:
                 inf._lastBlock = Inf_FALSE;
-                op_fallthrough(InfStep_ProcessNextBlock);
+                inf_FallThrough(InfStep_ProcessNextBlock);
                 
             /*-------------------------------------------------------------------------------------
              * infstep: READ_BLOCK_HEADER
@@ -546,51 +547,51 @@ InfAction Inf_decompress(Inflater*                  infptr,
                 if (inf._lastBlock) {
                     if (writePtr > inf.outputChunk) {
                         printf(" > END (use remaining output buffer)\n");
-                        op_return(InfAction_UseOutputBufferContent);
+                        inf_Return(InfAction_UseOutputBufferContent);
                     }
                     printf(" > END OF STREAM\n\n");
-                    op_end(InfAction_Finish);
+                    inf_Finish();
                 }
-                op_fallthrough(InfStep_ReadBlockHeader);
+                inf_FallThrough(InfStep_ReadBlockHeader);
                 
             case InfStep_ReadBlockHeader:
-                if ( !InfBS_ReadBits(infptr,&temp,3) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfBS_ReadBits(infptr,&temp,3) ) { inf_Return(InfAction_FillInputBuffer); }
                 inf._lastBlock = (temp&0x01)==0x01;
                 inf._blocktype = (temp>>1);
                 if      (inf._blocktype==BlockType_Uncompressed)   {
                     printf(" > Start Uncompressed Block\n");
-                    op_goto(InfStep_Process_UncompressedBlock);
+                    inf_Goto(InfStep_Process_UncompressedBlock);
                 }
                 else if (inf._blocktype==BlockType_FixedHuffman)   {
                     printf(" > Start Fixed Huffman Block\n");
-                    op_goto(InfStep_Load_FixedHuffmanDecoders);
+                    inf_Goto(InfStep_Load_FixedHuffmanDecoders);
                 }
                 else if (inf._blocktype==BlockType_DynamicHuffman) {
                     printf(" > Start Dynamic Huffman Block\n");
-                    op_goto(InfStep_Load_DynamicHuffmanDecoders);
+                    inf_Goto(InfStep_Load_DynamicHuffmanDecoders);
                 }
                 printf(" > Fatal Error (Bad Block Type)\n");
-                op_fatal_error(InfError_BadBlockType);
+                inf_FatalError(InfError_BadBlockType);
                 
             /*-------------------------------------------------------------------------------------
              * Process_UncompressedBlock
              */
             case InfStep_Process_UncompressedBlock:
-                if ( !InfBS_ReadDWord(infptr,&temp) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfBS_ReadDWord(infptr,&temp) ) { inf_Return(InfAction_FillInputBuffer); }
                 inf._seq_len = (temp >> 16);
-                if ( inf._seq_len != ((~temp)&0xFFFF) ) { op_fatal_error(InfError_BadBlockLength); }
-                op_fallthrough(InfStep_Output_UncompressedBlock);
+                if ( inf._seq_len != ((~temp)&0xFFFF) ) { inf_FatalError(InfError_BadBlockLength); }
+                inf_FallThrough(InfStep_Output_UncompressedBlock);
                 
             case InfStep_Output_UncompressedBlock:
                 numberOfBytes = min( (writeEnd-writePtr), inf._seq_len );
                 canReadAll    = InfBS_ReadBytes(infptr, writePtr, &numberOfBytes);
                 inf._seq_len -= numberOfBytes;
                 writePtr     += numberOfBytes;
-                if ( inf._seq_len>0 )   { op_return(InfAction_UseOutputBufferContent); }
-                else if ( !canReadAll ) { op_return(InfAction_FillInputBuffer);        }
+                if ( inf._seq_len>0 )   { inf_Return(InfAction_UseOutputBufferContent); }
+                else if ( !canReadAll ) { inf_Return(InfAction_FillInputBuffer);        }
                 
                 assert( inf._seq_len==0 );
-                op_goto(InfStep_ProcessNextBlock);
+                inf_Goto(InfStep_ProcessNextBlock);
 
             /*-------------------------------------------------------------------------------------
              * Load FixedHuffmanDecoders
@@ -598,92 +599,92 @@ InfAction Inf_decompress(Inflater*                  infptr,
             case InfStep_Load_FixedHuffmanDecoders:
                 inf.literalDecoder  = getFixedLiteralDecoder (infptr);
                 inf.distanceDecoder = getFixedDistanceDecoder(infptr);
-                op_goto(InfStep_Process_CompressedBlock);
+                inf_Goto(InfStep_Process_CompressedBlock);
                 
             /*-------------------------------------------------------------------------------------
              * Load DynamicHuffmanDecoders
              */
             case InfStep_Load_DynamicHuffmanDecoders:
-                if ( !InfBS_ReadBits(infptr,&temp,5+5+4) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfBS_ReadBits(infptr,&temp,5+5+4) ) { inf_Return(InfAction_FillInputBuffer); }
                 inf._hlit  = temp     & 0x1F;
                 inf._hdist = temp>>5  & 0x1F;
                 inf._hclen = temp>>10 & 0x0F;
-                op_fallthrough(InfStep_Load_FrontHuffmanTable);
+                inf_FallThrough(InfStep_Load_FrontHuffmanTable);
 
             /*----------------------------------
              * load "front" huffman table
              */
             case InfStep_Load_FrontHuffmanTable:
                 InfCL_Open(infptr,Inf_TRUE);
-                op_fallthrough(InfStep_Load_FrontHuffmanTable2);
+                inf_FallThrough(InfStep_Load_FrontHuffmanTable2);
                 
             case InfStep_Load_FrontHuffmanTable2:
-                if ( !InfCL_ReadCodes(infptr,inf._hclen+4) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfCL_ReadCodes(infptr,inf._hclen+4) ) { inf_Return(InfAction_FillInputBuffer); }
                 inf.frontDecoder = InfHD_load(huffmanTable0, InfCL_Close(infptr));
-                op_fallthrough(InfStep_Load_LiteralHuffmanTable);
+                inf_FallThrough(InfStep_Load_LiteralHuffmanTable);
                 
             /*----------------------------------
              * load literal-length huffman table
              */
             case InfStep_Load_LiteralHuffmanTable:
                 InfCL_Open(infptr,Inf_TRUE);
-                op_fallthrough(InfStep_Load_LiteralHuffmanTable2);
+                inf_FallThrough(InfStep_Load_LiteralHuffmanTable2);
                 
             case InfStep_Load_LiteralHuffmanTable2:
-                if ( !InfCL_ReadCompressedCodes(infptr,inf._hlit+257,inf.frontDecoder) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfCL_ReadCompressedCodes(infptr,inf._hlit+257,inf.frontDecoder) ) { inf_Return(InfAction_FillInputBuffer); }
                 inf.literalDecoder = InfHD_load(huffmanTable1, InfCL_Close(infptr));
-                op_fallthrough(InfStep_Load_DistanceHuffmanTable);
+                inf_FallThrough(InfStep_Load_DistanceHuffmanTable);
                 
             /*----------------------------------
              * load distance huffman table
              */
             case InfStep_Load_DistanceHuffmanTable:
                 InfCL_Open(infptr,Inf_FALSE);
-                op_fallthrough(InfStep_Load_DistanceHuffmanTable2);
+                inf_FallThrough(InfStep_Load_DistanceHuffmanTable2);
                 
             case InfStep_Load_DistanceHuffmanTable2:
-                if ( !InfCL_ReadCompressedCodes(infptr,inf._hdist+1,inf.frontDecoder) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfCL_ReadCompressedCodes(infptr,inf._hdist+1,inf.frontDecoder) ) { inf_Return(InfAction_FillInputBuffer); }
                 inf.distanceDecoder = InfHD_load(huffmanTable2, InfCL_Close(infptr));
-                op_fallthrough(InfStep_Process_CompressedBlock);
+                inf_FallThrough(InfStep_Process_CompressedBlock);
                 
             /*-------------------------------------------------------------------------------------
              * Process Compressed Block
              */
             case InfStep_Process_CompressedBlock:
             case InfStep_Read_LiteralOrLength:
-                if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf.literalDecoder) ) { op_return(InfAction_FillInputBuffer); }
-                op_fallthrough(InfStep_Read_LiteralOrLength2);
+                if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf.literalDecoder) ) { inf_Return(InfAction_FillInputBuffer); }
+                inf_FallThrough(InfStep_Read_LiteralOrLength2);
                 
             case InfStep_Read_LiteralOrLength2:
                 if (inf._literal <Inf_EndOfBlock) {
-                    if (writePtr==writeEnd) { op_return(InfAction_UseOutputBufferContent); }
+                    if (writePtr==writeEnd) { inf_Return(InfAction_UseOutputBufferContent); }
                     *writePtr++ = inf._literal;
-                    op_goto(InfStep_Read_LiteralOrLength);
+                    inf_Goto(InfStep_Read_LiteralOrLength);
                 }
                 else if (inf._literal==Inf_EndOfBlock) {
                     printf(" > EndOfBlock\n");
-                    op_goto(InfStep_ProcessNextBlock);
+                    inf_Goto(InfStep_ProcessNextBlock);
                 }
-                else if (inf._literal>Inf_MaxValidLengthCode) { op_fatal_error(InfError_BadBlockContent); }
+                else if (inf._literal>Inf_MaxValidLengthCode) { inf_FatalError(InfError_BadBlockContent); }
                 inf._literal -= 257;
-                op_fallthrough(InfStep_Read_LengthBits);
+                inf_FallThrough(InfStep_Read_LengthBits);
                 
             case InfStep_Read_LengthBits:
-                if ( !InfBS_ReadBits(infptr, &temp, lengthExtraBits[inf._literal]) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfBS_ReadBits(infptr, &temp, lengthExtraBits[inf._literal]) ) { inf_Return(InfAction_FillInputBuffer); }
                 inf._seq_len   =   temp + lengthStarts[inf._literal];
                 assert( inf._seq_len<(32*1024) );
-                op_fallthrough(InfStep_Read_Distance);
+                inf_FallThrough(InfStep_Read_Distance);
                 
             case InfStep_Read_Distance:
-                if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf.distanceDecoder) ) { op_return(InfAction_FillInputBuffer); }
-                if (inf._literal>Inf_MaxValidDistanceCode) { op_fatal_error(InfError_BadBlockContent); }
-                op_fallthrough(InfStep_Read_DistanceBits);
+                if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf.distanceDecoder) ) { inf_Return(InfAction_FillInputBuffer); }
+                if (inf._literal>Inf_MaxValidDistanceCode) { inf_FatalError(InfError_BadBlockContent); }
+                inf_FallThrough(InfStep_Read_DistanceBits);
                 
             case InfStep_Read_DistanceBits:
-                if ( !InfBS_ReadBits(infptr, &temp, distanceExtraBits[inf._literal]) ) { op_return(InfAction_FillInputBuffer); }
+                if ( !InfBS_ReadBits(infptr, &temp, distanceExtraBits[inf._literal]) ) { inf_Return(InfAction_FillInputBuffer); }
                 inf._seq_dist =  temp + distanceStarts[inf._literal];
                 assert( inf._seq_dist<(32*1024) );
-                op_fallthrough(InfStep_Output_RepeatedSequence);
+                inf_FallThrough(InfStep_Output_RepeatedSequence);
 
             /*-------------------------------------------------------------------------------------
              * Output_RepeatedSequence
@@ -700,17 +701,17 @@ InfAction Inf_decompress(Inflater*                  infptr,
                     inf._seq_len -= numberOfBytes = min( inf._seq_len, (writeEnd-sequencePtr) );
                     memmove( writePtr, sequencePtr, numberOfBytes ); writePtr+=numberOfBytes;
                     /*-----------------*/
-                    if ( inf._seq_len==0 ) { op_goto(InfStep_Read_LiteralOrLength); }
-                    if ( writePtr==writeEnd )  { op_return(InfAction_UseOutputBufferContent); }
+                    if ( inf._seq_len==0    ) { inf_Goto(InfStep_Read_LiteralOrLength); }
+                    if ( writePtr==writeEnd ) { inf_Return(InfAction_UseOutputBufferContent); }
                     sequencePtr = outputBufferBegin;
                 }
                 /*-- copy bytes ---*/
                 inf._seq_len -= numberOfBytes = min( inf._seq_len, (writeEnd-writePtr) );
                 while ( numberOfBytes-->0 ) { *writePtr++ = *sequencePtr++; }
                 /*-----------------*/
-                if ( inf._seq_len==0 ) { op_goto(InfStep_Read_LiteralOrLength); }
-                if ( writePtr==writeEnd )  { op_return(InfAction_UseOutputBufferContent); }
-                op_fatal_error(InfError_BadBlockContent);
+                if ( inf._seq_len==0    ) { inf_Goto(InfStep_Read_LiteralOrLength); }
+                if ( writePtr==writeEnd ) { inf_Return(InfAction_UseOutputBufferContent); }
+                inf_FatalError(InfError_BadBlockContent);
                 
                 
             case InfStep_FatalError:
@@ -722,10 +723,7 @@ InfAction Inf_decompress(Inflater*                  infptr,
     inf.step                     = (unsigned)step;
     inf.outputChunkSize          = (writePtr - inf.outputChunk);
     inf.outputBufferContentSize += inf.outputChunkSize;
-    inf.action                   = exit_status>=0 ? (InfAction)exit_status : InfAction_Finish;
-    inf.error                    = exit_status <0 ? (InfError )exit_status : InfError_None;
-    
-    printf(" # exit_stats = %d\n", exit_status);
+    printf(" # inf.action = %d\n", inf.action);
     return inf.action;
 }
 
