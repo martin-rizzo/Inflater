@@ -41,14 +41,21 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
 
 #define Inf_MainTableSize 256      /**< 8bits                        */
-#define InfHuffTableSize  (2*1024) /**< main-table + all sub-tables  */
+#define Inf_HuffTableSize  (2*1024) /**< main-table + all sub-tables  */
 #define Inf_LastValidLength 18
 #define Inf_InvalidLength   24
 #define Inf_MaxNumberOfCodes 19
 #define Inf_CodeLengthTableSize ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
 
-
 #define inf (*infptr)
+
+/* Macros used for control flow inside the 'inflateProcessChunk(..) function */
+#define inf__FILL_INPUT_BUFFER()                             inf.action=InfAction_FillInputBuffer;        break;
+#define inf__USE_OUTPUT_BUFFER_CONTENT()                     inf.action=InfAction_UseOutputBufferContent; break;
+#define inf__FINISH()               step=InfStep_End;        inf.action=InfAction_Finish;                 break;
+#define inf__ERROR(err)             step=InfStep_FatalError; inf.action=InfAction_Finish; inf.error=err;  break;
+#define inf__goto(dest_step)        step=dest_step;                                                       break;
+#define inf__fallthrough(next_step) step=next_step;
 
 
 /*====================================================================================================================*/
@@ -175,7 +182,7 @@ const InfHuff* InfHD_load(InfHuff* table, const unsigned int *sourtable) {
         data.subtable.mask  = (1<<(maxLength-8))-1;
         table[firstHuffman] = data;
         insertIndex += CL_makeSubTable(&table[insertIndex],
-                                       (InfHuffTableSize-insertIndex),
+                                       (Inf_HuffTableSize-insertIndex),
                                        firstHuffman, maxLength,
                                        sourtable, firstIndex, index
                                        );
@@ -448,13 +455,13 @@ typedef enum InfStep {
 
 
 /* TODO: remove these globals! */
-static InfHuff huffmanTable0[InfHuffTableSize];
-static InfHuff huffmanTable1[InfHuffTableSize];
-static InfHuff huffmanTable2[InfHuffTableSize];
+static InfHuff huffmanTable0[Inf_HuffTableSize];
+static InfHuff huffmanTable1[Inf_HuffTableSize];
+static InfHuff huffmanTable2[Inf_HuffTableSize];
 
 
 static InfHuff* getFixedLiteralDecoder(Inflater* infptr) {
-    static InfHuff table[InfHuffTableSize];
+    static InfHuff table[Inf_HuffTableSize];
     static InfBool loaded = Inf_FALSE;
     if (!loaded) {
         loaded = Inf_TRUE;
@@ -469,7 +476,7 @@ static InfHuff* getFixedLiteralDecoder(Inflater* infptr) {
 }
 
 static InfHuff* getFixedDistanceDecoder(Inflater* infptr) {
-    static InfHuff table[InfHuffTableSize];
+    static InfHuff table[Inf_HuffTableSize];
     static InfBool loaded = Inf_FALSE;
     if (!loaded) {
         loaded = Inf_TRUE;
@@ -480,18 +487,12 @@ static InfHuff* getFixedDistanceDecoder(Inflater* infptr) {
     return table;
 }
 
-/* Macros used for control flow inside the 'inflateProcessChunk(..) function */
-#define inf__FILL_INPUT_BUFFER()                             inf.action=InfAction_FillInputBuffer;        break;
-#define inf__USE_OUTPUT_BUFFER_CONTENT()                     inf.action=InfAction_UseOutputBufferContent; break;
-#define inf__FINISH()               step=InfStep_End;        inf.action=InfAction_Finish;                 break;
-#define inf__ERROR(err)             step=InfStep_FatalError; inf.action=InfAction_Finish; inf.error=err;  break;
-#define inf__goto(dest_step)        step=dest_step;                                                       break;
-#define inf__fallthrough(next_step) step=next_step;
 
 
 
 
-
+/*====================================================================================================================*/
+#   pragma mark - IMPLEMENTATION OF PUBLIC FUNCTIONS
 
 
 Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
