@@ -122,7 +122,7 @@ typedef struct Inflater {
     
     
     /* HIDDEN: decompress */
-    int       step;
+    unsigned step;
     
     unsigned _lastBlock;
     unsigned _blocktype;

@@ -489,14 +489,6 @@ static InfHuff* getFixedDistanceDecoder(Inflater* infptr) {
 /**
  * Decompress a chunk of compressed data
  *
- * @param outputPtr
- *     The pointer to the position where the resulting uncompressed data will be written to.
- *     This pointer must point to a valid position within the output buffer.
- *
- * @param inout_outputBytes
- *     [in]  The number of bytes avariable to write.
- *     [out] The number of bytes successfully written
- *
  * @param outputBufferBegin
  *     The beginning of the output buffer (used when copying previous sequences)
  *
@@ -504,8 +496,6 @@ static InfHuff* getFixedDistanceDecoder(Inflater* infptr) {
  *     The total size of the output buffer (in number of bytes)
  */
 InfAction Inf_decompress(Inflater*                  infptr,
-                         unsigned char* const       outputPtr,
-                         size_t*                    inout_outputBytes,
                          unsigned char* const       outputBufferBegin,
                          size_t                     outputBufferSize)
 {
@@ -531,13 +521,12 @@ InfAction Inf_decompress(Inflater*                  infptr,
     InfStep step;
     int     exit_status;
 
-    unsigned char* const writeEnd = outputPtr + (*inout_outputBytes);
-    unsigned char*       writePtr = outputPtr;
+    unsigned char* const writeEnd = (outputBufferBegin + outputBufferSize);
+    unsigned char*       writePtr = inf.outputChunk;
 
     assert( inf.inputChunkPtr!=NULL );
     assert( inf.inputChunkPtr<inf.inputChunkEnd );
-    assert( outputPtr!=NULL );
-    assert( inout_outputBytes!=NULL && (*inout_outputBytes)>0 );
+    assert( inf.outputChunk!=NULL && inf.outputChunk<(outputBufferBegin+outputBufferSize) );
     assert( outputBufferBegin!=NULL );
     assert( outputBufferSize>=(32*1024) );
 
@@ -555,7 +544,7 @@ InfAction Inf_decompress(Inflater*                  infptr,
              */
             case InfStep_ProcessNextBlock:
                 if (inf._lastBlock) {
-                    if (writePtr > outputPtr) {
+                    if (writePtr > inf.outputChunk) {
                         printf(" > END (use remaining output buffer)\n");
                         op_return(InfAction_UseOutputBufferContent);
                     }
@@ -730,9 +719,8 @@ InfAction Inf_decompress(Inflater*                  infptr,
         }
     }
     
-    
-    inf.step                     = step;
-    inf.outputChunkSize          = (writePtr          - outputPtr);
+    inf.step                     = (unsigned)step;
+    inf.outputChunkSize          = (writePtr - inf.outputChunk);
     inf.outputBufferContentSize += inf.outputChunkSize;
     inf.action                   = exit_status>=0 ? (InfAction)exit_status : InfAction_Finish;
     inf.error                    = exit_status <0 ? (InfError )exit_status : InfError_None;
@@ -804,11 +792,6 @@ InfAction inflaterProcessChunk(Inflater*   inflater,
                                const void* inputBuffer,
                                size_t      inputBufferSize) {
 
-    InfAction status;
-    size_t outputBytes;
-    /* const Byte* const inputBufferEnd  = (Byte*)inputBuffer  + inputBufferSize; */
-    Byte* const       outputBufferEnd = (Byte*)outputBuffer + outputBufferSize;
-    
     assert( inputBuffer !=NULL && inputBufferSize >0 );
     assert( outputBuffer!=NULL && outputBufferSize>0 );
     
@@ -841,18 +824,7 @@ InfAction inflaterProcessChunk(Inflater*   inflater,
             return inflater->action;
     }
     
-    assert( inflater->inputChunkPtr < inflater->inputChunkEnd  );
-    assert( inflater->outputChunk   < outputBufferEnd          );
-    
-    /* inputBytes  = (inputBufferEnd  - inflater->inputChunk ); */
-    outputBytes = (outputBufferEnd - inflater->outputChunk);
-    
-    status = Inf_decompress(inflater,
-                            inflater->outputChunk, &outputBytes,
-                            (unsigned char*)outputBuffer, outputBufferSize);
-    
-    
-    return inflater->action;
+    return Inf_decompress(inflater, (Byte*)outputBuffer, outputBufferSize);
 }
 
 
