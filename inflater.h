@@ -43,7 +43,7 @@
 #define Inf_MaxValidDistanceCode 29
 #define Inf_LastValidLength      18
 #define Inf_LastValidCode        290
-#define Inf_CodeLengthTableSize  ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
+#define Inf_CodeLengthMapSize    ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
 #define Inf_NextIndexMask        0x03FF
 
 
@@ -83,6 +83,12 @@ typedef union InfHuff {
     struct subtable { unsigned   mask:15,   error:1, index:15; } subtable;
     unsigned raw;
 } InfHuff;
+
+typedef struct InfCodeLen {
+    unsigned code;
+    unsigned length;
+    unsigned index;
+} InfCodeLen;
 
 #define InfHuff_Set(s, code_,length_) s.value.code=code_; s.value.isvalid=1; s.value.length=length_
 #define InfHuff_SubTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
@@ -146,15 +152,15 @@ typedef struct Inflater {
            unsigned < 32bits >     <  16bits  >:<6bits>:< 10bits  >
          [length,code,nextIndex] = [   code   ]:[ len ]:[nextIndex]
          */
-        unsigned  table[Inf_CodeLengthTableSize];
-        unsigned  command;
-        unsigned  code;
-        unsigned  length;
-        unsigned  repetitions;
-        unsigned* insertPtr[Inf_LastValidLength+1];
+        InfCodeLen  map[Inf_CodeLengthMapSize];
+        InfCodeLen* insertPtr[Inf_LastValidLength+1];
+        unsigned    command;
+        unsigned    code;
+        unsigned    length;
+        unsigned    repetitions;
         unsigned char lengths[19];
-        int       nextIndex;
-        int       size;
+        int         nextIndex;
+        int         size;
         
     } cl;
 
