@@ -92,60 +92,55 @@ static unsigned reversedINC(unsigned huffman, unsigned length) {
     return huffman;
 }
 
-static void setWithRepetitions(InfHuff*  table,
-                               unsigned  availableEntries,
-                               unsigned  huffman,
-                               InfHuff   data,
-                               unsigned  length)
+static void InfHuff_FillTableWithRepetitions(InfHuff*  table,
+                                             unsigned  availableEntries,
+                                             unsigned  huffman,
+                                             unsigned  code,
+                                             unsigned  length,
+                                             unsigned  discardedBits)
 {
-    unsigned unknownBits; const unsigned unknownStep = (1<<length);
-    assert( table!=NULL && huffman<(1<<length) && length>=1 );
+    unsigned unknownBits; InfHuff data;
+    const unsigned knownHuffman = huffman >> discardedBits;
+    const unsigned unknownStep  = (1<<(length-discardedBits));
+    assert( table!=NULL && length>discardedBits && huffman<(1<<length) );
+    
+    InfHuff_Set(data,code,length);
     for (unknownBits=0; unknownBits<availableEntries; unknownBits+=unknownStep) {
-        table[ unknownBits | huffman ] = data;
+        table[ unknownBits | knownHuffman ] = data;
     }
 }
 
-static int CL_makeSubTable(InfHuff*           subtable,
-                           int                availableEntries,
-                           unsigned           firstHuffman,
-                           unsigned           maxLength,
-                           const unsigned*    sourtable,
-                           int                firstIndex,
-                           int                endIndex)
+static int InfHuff_MakeSubTable(InfHuff*           subtable,
+                                int                availableEntries,
+                                unsigned           firstHuffman,
+                                unsigned           maxLength,
+                                const unsigned*    sourtable,
+                                int                firstIndex,
+                                int                endIndex)
 {
     static const unsigned DiscardedBits = 8; /**< number of bits discarded by the subtable */
     const int numberOfEntries = 1<<(maxLength-DiscardedBits);
     unsigned huffman; int index;
     
-    assert( numberOfEntries<=availableEntries  );
+    assert( subtable!=NULL && numberOfEntries<=availableEntries  );
     
     huffman = firstHuffman;
-    index   = firstIndex;
-    while ( index!=endIndex ) {
-        const unsigned code   = CL_getCodeAt(sourtable,index);
+    for ( index=firstIndex; index!=endIndex; index=CL_getNextIndex(sourtable,index) ) {
         const unsigned length = CL_getLengthAt(sourtable,index);
-        InfHuff data;
-        data.value.code    = code;
-        data.value.length  = length;
-        data.value.isvalid = 1;
-        setWithRepetitions(subtable, numberOfEntries, huffman>>DiscardedBits, data, length-DiscardedBits);
-
+        InfHuff_FillTableWithRepetitions(subtable, numberOfEntries, huffman, CL_getCodeAt(sourtable,index), length, DiscardedBits);
         huffman = reversedINC(huffman,length);
-        index   = CL_getNextIndex(sourtable,index);
     }
     return numberOfEntries;
 }
 
 
-const InfHuff* InfHD_load(InfHuff* table, const unsigned int *sourtable) {
-    InfHuff invalid, data; int i, index, insertIndex;
-    unsigned huffman, length, maxLength;
+const InfHuff* InfHuff_MakeTable(InfHuff* table, const unsigned int *sourtable) {
+    static const InfHuff invalid = InfHuff_Const(0, Inf_InvalidLength);
+    InfHuff data; int i, index, insertIndex;
+    unsigned huffman, length;
     assert( table!=NULL && sourtable!=NULL  );
     
     /* reset the main-table */
-    invalid.value.isvalid = 1;
-    invalid.value.code    = 0;
-    invalid.value.length  = Inf_InvalidLength;
     for (i=0; i<Inf_MainTableSize; ++i) { table[i] = invalid; }
     
     huffman = 0;
@@ -155,11 +150,7 @@ const InfHuff* InfHD_load(InfHuff* table, const unsigned int *sourtable) {
     /* lengths from 1 to 8                              */
     /* unknown bits are filled with all possible values */
     while ( index!=0 && length<=8 ) {
-        InfHuff data;
-        data.value.isvalid = 1;
-        data.value.code    = CL_getCodeAt(sourtable,index);
-        data.value.length  = length;
-        setWithRepetitions(table, 256, huffman, data, length);
+        InfHuff_FillTableWithRepetitions(table, 256, huffman, CL_getCodeAt(sourtable,index), length, 0);
         huffman = reversedINC(huffman,length);
         index   = CL_getNextIndex(sourtable,index);
         length  = CL_getLengthAt(sourtable,index);
@@ -176,22 +167,18 @@ const InfHuff* InfHD_load(InfHuff* table, const unsigned int *sourtable) {
             index   = CL_getNextIndex(sourtable,index);
         } while ( index!=0 && (huffman&0xFF)==(firstHuffman&0xFF) );
         
-        maxLength = length;
-        data.subtable.error = 0;
-        data.subtable.index = insertIndex;
-        data.subtable.mask  = (1<<(maxLength-8))-1;
-        table[firstHuffman] = data;
-        insertIndex += CL_makeSubTable(&table[insertIndex],
-                                       (Inf_HuffTableSize-insertIndex),
-                                       firstHuffman, maxLength,
-                                       sourtable, firstIndex, index
-                                       );
+        table[firstHuffman] = InfHuff_SubTableRef(data, insertIndex, (1<<(length-8))-1);
+        insertIndex += InfHuff_MakeSubTable(&table[insertIndex],
+                                            (Inf_HuffTableSize-insertIndex),
+                                            firstHuffman, length,
+                                            sourtable, firstIndex, index
+                                            );
     }
     return table;
 }
 
 
-#define InfHD_decode(table, tmp, bitbuffer) \
+#define InfHuff_Decode(table, tmp, bitbuffer) \
     (tmp=table[bitbuffer & 0xFF], tmp.value.isvalid ? tmp : table[ tmp.subtable.index + ((bitbuffer>>8) & tmp.subtable.mask) ])
 
 
@@ -225,11 +212,11 @@ static InfBool InfBS_ReadCompressedBits(Inflater* infptr, unsigned* dest, const 
     assert( infptr!=NULL && dest!=NULL && table!=NULL );
 
     if (inf.bitcounter==0 && !InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
-    data=InfHD_decode(table, tmp, inf.bitbuffer); numberOfBitsToAdvance=data.value.length;
+    data=InfHuff_Decode(table, tmp, inf.bitbuffer); numberOfBitsToAdvance=data.value.length;
     
     while (inf.bitcounter<numberOfBitsToAdvance) {
         if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
-        data=InfHD_decode(table, tmp, inf.bitbuffer); numberOfBitsToAdvance=data.value.length;
+        data=InfHuff_Decode(table, tmp, inf.bitbuffer); numberOfBitsToAdvance=data.value.length;
     }
     (*dest) = data.value.code;
     inf.bitbuffer >>= numberOfBitsToAdvance;
@@ -470,7 +457,7 @@ static InfHuff* getFixedLiteralDecoder(Inflater* infptr) {
         InfCL_AddRange(infptr, 144,256, 9);
         InfCL_AddRange(infptr, 256,280, 7);
         InfCL_AddRange(infptr, 280,288, 8);
-        InfHD_load(table, InfCL_Close(infptr) );
+        InfHuff_MakeTable(table, InfCL_Close(infptr) );
     }
     return table;
 }
@@ -482,7 +469,7 @@ static InfHuff* getFixedDistanceDecoder(Inflater* infptr) {
         loaded = Inf_TRUE;
         InfCL_Open(infptr, Inf_TRUE);
         InfCL_AddRange(infptr, 0,32, 5);
-        InfHD_load(table, InfCL_Close(infptr) );
+        InfHuff_MakeTable(table, InfCL_Close(infptr) );
     }
     return table;
 }
@@ -692,7 +679,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_FrontHuffmanTable2:
                 if ( !InfCL_ReadCodes(infptr,inf._hclen+4) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.frontDecoder = InfHD_load(huffmanTable0, InfCL_Close(infptr));
+                inf.frontDecoder = InfHuff_MakeTable(huffmanTable0, InfCL_Close(infptr));
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
             /*----------------------------------
@@ -704,7 +691,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_LiteralHuffmanTable2:
                 if ( !InfCL_ReadCompressedCodes(infptr,inf._hlit+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.literalDecoder = InfHD_load(huffmanTable1, InfCL_Close(infptr));
+                inf.literalDecoder = InfHuff_MakeTable(huffmanTable1, InfCL_Close(infptr));
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
             /*----------------------------------
@@ -716,7 +703,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_DistanceHuffmanTable2:
                 if ( !InfCL_ReadCompressedCodes(infptr,inf._hdist+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.distanceDecoder = InfHD_load(huffmanTable2, InfCL_Close(infptr));
+                inf.distanceDecoder = InfHuff_MakeTable(huffmanTable2, InfCL_Close(infptr));
                 inf__fallthrough(InfStep_Process_CompressedBlock);
                 
             /*-------------------------------------------------------------------------------------
