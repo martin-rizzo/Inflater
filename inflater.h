@@ -153,7 +153,7 @@ typedef struct Inflater {
          [length,code,nextIndex] = [   code   ]:[ len ]:[nextIndex]
          */
         InfCodeLen  map[Inf_CodeLengthMapSize];
-        InfCodeLen* insertPtr[Inf_LastValidLength+1];
+        InfCodeLen* headPtr[Inf_LastValidLength+1];
         unsigned    command;
         unsigned    code;
         unsigned    length;
