@@ -250,7 +250,7 @@ static void InfCL_Add(Inflater* infptr, int code, unsigned length) {
     if (length>0) {
         InfCodelen* headPtr = inf.cl.headPtr[length];
         headPtr->index = inf.cl.nextIndex;
-        headPtr = &inf.cl.map[ inf.cl.nextIndex++ ];
+        headPtr = &inf.cl.codelenList[ inf.cl.nextIndex++ ];
         headPtr->code   = code;
         headPtr->length = length;
         inf.cl.headPtr[length] = headPtr;
@@ -277,7 +277,7 @@ static void InfCL_Open(Inflater* infptr, InfBool resetRepetitions) {
     inf.cl.size      = 0;
     inf.cl.nextIndex = (Inf_LastValidLength+1);
     for (length=0; length<=Inf_LastValidLength; ++length) {
-        inf.cl.headPtr[length] = &inf.cl.map[length];
+        inf.cl.headPtr[length] = &inf.cl.codelenList[length];
         inf.cl.headPtr[length]->index  = 0;
         inf.cl.headPtr[length]->code   = 0;
         inf.cl.headPtr[length]->length = 0;
@@ -290,13 +290,13 @@ static const InfCodelen* InfCL_Close(Inflater* infptr) {
     do {
         unsigned nextIndex = 0;
         do {
-            nextIndex = inf.cl.map[++length].index;
+            nextIndex = inf.cl.codelenList[++length].index;
         } while ( length<Inf_LastValidLength && nextIndex==0 );
         inf.cl.headPtr[prevLength]->index = nextIndex;
         prevLength = length;
     } while ( length<Inf_LastValidLength );
     inf.cl.nextIndex = 0;
-    return inf.cl.map;
+    return inf.cl.codelenList;
 }
 
 static InfBool InfCL_ReadCodes(Inflater* infptr, unsigned numberOfCodes) {

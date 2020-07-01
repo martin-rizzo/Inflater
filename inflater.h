@@ -152,7 +152,7 @@ typedef struct Inflater {
            unsigned < 32bits >     <  16bits  >:<6bits>:< 10bits  >
          [length,code,nextIndex] = [   code   ]:[ len ]:[nextIndex]
          */
-        InfCodelen  map[Inf_CodeLengthMapSize];
+        InfCodelen  codelenList[Inf_CodeLengthMapSize];
         InfCodelen* headPtr[Inf_LastValidLength+1];
         unsigned    command;
         unsigned    code;
