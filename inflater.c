@@ -62,12 +62,12 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 #   pragma mark - HUFFMAN DECODER
 
 
-static const InfCodeLen* CL_getFirstElement(const InfCodeLen* codelenList) {
+static const InfCodelen* CL_getFirstElement(const InfCodelen* codelenList) {
     assert( codelenList!=NULL );
     return &codelenList[ codelenList[0].index ];
 }
 
-static const InfCodeLen* CL_getNextElement(const InfCodeLen* codelenList, const InfCodeLen* codelen) {
+static const InfCodelen* CL_getNextElement(const InfCodelen* codelenList, const InfCodelen* codelen) {
     assert( codelenList!=NULL && codelen!=NULL );
     return codelen->index>0 ? &codelenList[ codelen->index ] : NULL;
 }
@@ -101,13 +101,13 @@ static int InfHuff_MakeSubTable(InfHuff*           subtable,
                                 int                availableEntries,
                                 unsigned           firstHuffman,
                                 unsigned           maxLength,
-                                const InfCodeLen*  codelenList,
-                                const InfCodeLen*  firstCodelen,
-                                const InfCodeLen*  lastCodelen)
+                                const InfCodelen*  codelenList,
+                                const InfCodelen*  firstCodelen,
+                                const InfCodelen*  lastCodelen)
 {
     static const unsigned DiscardedBits = 8; /**< number of bits discarded by the subtable */
     const int numberOfEntries = 1<<(maxLength-DiscardedBits);
-    unsigned huffman; const InfCodeLen* codelen;
+    unsigned huffman; const InfCodelen* codelen;
     
     assert( subtable!=NULL && numberOfEntries<=availableEntries  );
     
@@ -121,9 +121,9 @@ static int InfHuff_MakeSubTable(InfHuff*           subtable,
 }
 
 
-const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodeLen *codelenList) {
+const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *codelenList) {
     static const InfHuff invalid = InfHuff_Const(0, Inf_InvalidLength);
-    InfHuff data; int i, insertIndex; const InfCodeLen* codelen;
+    InfHuff data; int i, insertIndex; const InfCodelen* codelen;
     unsigned huffman, length;
     assert( table!=NULL && codelenList!=NULL  );
     
@@ -147,7 +147,7 @@ const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodeLen *codelenList) 
     insertIndex = Inf_MainTableSize;
     while ( codelen!=NULL ) {
         const unsigned    firstHuffman = huffman;
-        const InfCodeLen* firstCodelen = codelen;
+        const InfCodelen* firstCodelen = codelen;
         do {
             length  = codelen->length;
             huffman = reversedINC(huffman,length);
@@ -248,7 +248,7 @@ static void InfCL_Add(Inflater* infptr, int code, unsigned length) {
     assert( 0<=length && length<=Inf_LastValidLength );
     assert( inf.cl.headPtr[length]!=NULL );
     if (length>0) {
-        InfCodeLen* headPtr = inf.cl.headPtr[length];
+        InfCodelen* headPtr = inf.cl.headPtr[length];
         headPtr->index = inf.cl.nextIndex;
         headPtr = &inf.cl.map[ inf.cl.nextIndex++ ];
         headPtr->code   = code;
@@ -284,7 +284,7 @@ static void InfCL_Open(Inflater* infptr, InfBool resetRepetitions) {
     }
 }
 
-static const InfCodeLen* InfCL_Close(Inflater* infptr) {
+static const InfCodelen* InfCL_Close(Inflater* infptr) {
     int prevLength = 0;
     int length     = 0;
     do {
