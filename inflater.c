@@ -64,12 +64,12 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
 static const InfCodelen* CL_getFirstElement(const InfCodelen* codelenList) {
     assert( codelenList!=NULL );
-    return &codelenList[ codelenList[0].index ];
+    return codelenList->next;
 }
 
 static const InfCodelen* CL_getNextElement(const InfCodelen* codelenList, const InfCodelen* codelen) {
     assert( codelenList!=NULL && codelen!=NULL );
-    return codelen->index>0 ? &codelenList[ codelen->index ] : NULL;
+    return codelen!=NULL ? codelen->next : NULL;
 }
 
 static unsigned reversedINC(unsigned huffman, unsigned length) {
@@ -246,14 +246,13 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 static void InfCL_Add(Inflater* infptr, int code, unsigned length) {
     assert( 0<=code   &&   code<=Inf_LastValidCode   );
     assert( 0<=length && length<=Inf_LastValidLength );
-    assert( inf.cl.headPtr[length]!=NULL );
+    assert( inf.cl.tailPtr[length]!=NULL );
     if (length>0) {
-        InfCodelen* headPtr = inf.cl.headPtr[length];
-        headPtr->index = inf.cl.nextIndex;
-        headPtr = &inf.cl.codelenList[ inf.cl.nextIndex++ ];
-        headPtr->code   = code;
-        headPtr->length = length;
-        inf.cl.headPtr[length] = headPtr;
+        InfCodelen* tailPtr = inf.cl.tailPtr[length];
+        tailPtr = tailPtr->next = &inf.cl.codelenList[ inf.cl.nextIndex++ ];
+        tailPtr->code   = code;
+        tailPtr->length = length;
+        inf.cl.tailPtr[length] = tailPtr;
     }                                                                 \
     ++inf.cl.size;
 }
@@ -277,22 +276,23 @@ static void InfCL_Open(Inflater* infptr, InfBool resetRepetitions) {
     inf.cl.size      = 0;
     inf.cl.nextIndex = (Inf_LastValidLength+1);
     for (length=0; length<=Inf_LastValidLength; ++length) {
-        inf.cl.headPtr[length] = &inf.cl.codelenList[length];
-        inf.cl.headPtr[length]->index  = 0;
-        inf.cl.headPtr[length]->code   = 0;
-        inf.cl.headPtr[length]->length = 0;
+        inf.cl.tailPtr[length] = &inf.cl.codelenList[length];
+        inf.cl.tailPtr[length]->code   = 0;
+        inf.cl.tailPtr[length]->length = 0;
+        inf.cl.tailPtr[length]->next   = NULL;
     }
 }
 
 static const InfCodelen* InfCL_Close(Inflater* infptr) {
     int prevLength = 0;
     int length     = 0;
+    /* connect all lists creating a big one sorted by `length` */
     do {
-        unsigned nextIndex = 0;
+        InfCodelen* next = NULL;
         do {
-            nextIndex = inf.cl.codelenList[++length].index;
-        } while ( length<Inf_LastValidLength && nextIndex==0 );
-        inf.cl.headPtr[prevLength]->index = nextIndex;
+            next = inf.cl.codelenList[++length].next;
+        } while ( length<Inf_LastValidLength && next==NULL );
+        inf.cl.tailPtr[prevLength]->next = next;
         prevLength = length;
     } while ( length<Inf_LastValidLength );
     inf.cl.nextIndex = 0;

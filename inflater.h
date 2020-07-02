@@ -85,9 +85,9 @@ typedef union InfHuff {
 } InfHuff;
 
 typedef struct InfCodelen {
-    unsigned code;
-    unsigned length;
-    unsigned index;
+    unsigned           code;
+    unsigned           length;
+    struct InfCodelen* next;
 } InfCodelen;
 
 #define InfHuff_Set(s, code_,length_) s.value.code=code_; s.value.isvalid=1; s.value.length=length_
@@ -153,7 +153,7 @@ typedef struct Inflater {
          [length,code,nextIndex] = [   code   ]:[ len ]:[nextIndex]
          */
         InfCodelen  codelenList[Inf_CodeLengthMapSize];
-        InfCodelen* headPtr[Inf_LastValidLength+1];
+        InfCodelen* tailPtr[Inf_LastValidLength+1];
         unsigned    command;
         unsigned    code;
         unsigned    length;
