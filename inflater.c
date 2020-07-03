@@ -74,20 +74,29 @@ static unsigned InfHuff_RevIncrement(unsigned huffman, unsigned length) {
     return huffman;
 }
 
+/**
+ * Fills the huffman table
+ * @param table            Pointer to the huffman table (or sub-table) to fill
+ * @param tableSize        Number of entries available in `table`
+ * @param huffman          The huffman code (but with bits in reverse order)
+ * @param huffmanLength    The length of the huffman code in number of bits
+ * @param byte             The decoded byte corresponding to the provided huffman code
+ * @param discardedBits    Number of bits to discard (0=table, 8=sub-table)
+ */
 static void InfHuff_FillTableWithRepetitions(InfHuff*  table,
-                                             unsigned  availableEntries,
+                                             unsigned  tableSize,
                                              unsigned  huffman,
-                                             unsigned  code,
-                                             unsigned  length,
+                                             unsigned  huffmanLength,
+                                             unsigned  byte,
                                              unsigned  discardedBits)
 {
     unsigned unknownBits; InfHuff data;
     const unsigned knownHuffman = huffman >> discardedBits;
-    const unsigned unknownStep  = (1<<(length-discardedBits));
-    assert( table!=NULL && length>discardedBits && huffman<(1<<length) );
+    const unsigned unknownStep  = (1<<(huffmanLength-discardedBits));
+    assert( table!=NULL && huffmanLength>discardedBits && huffman<(1<<huffmanLength) );
     
-    InfHuff_Set(data,code,length);
-    for (unknownBits=0; unknownBits<availableEntries; unknownBits+=unknownStep) {
+    InfHuff_Set(data,byte,huffmanLength);
+    for (unknownBits=0; unknownBits<tableSize; unknownBits+=unknownStep) {
         table[ unknownBits | knownHuffman ] = data;
     }
 }
@@ -111,7 +120,7 @@ static int InfHuff_MakeSubTable(InfHuff*           subtable,
     huffman = firstHuffman;
     for ( codelen=codelen_begin; codelen!=codelen_end; codelen=codelen->next ) {
         const unsigned length = codelen->length;
-        InfHuff_FillTableWithRepetitions(subtable, numberOfEntries, huffman, codelen->code, length, DiscardedBits);
+        InfHuff_FillTableWithRepetitions(subtable, numberOfEntries, huffman, length, codelen->code, DiscardedBits);
         huffman = InfHuff_RevIncrement(huffman,length);
     }
     return numberOfEntries;
@@ -140,7 +149,7 @@ const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen)
     /* lengths from 1 to 8                              */
     /* unknown bits are filled with all possible values */
     while ( codelen!=NULL && length<=8 ) {
-        InfHuff_FillTableWithRepetitions(table, 256, huffman, codelen->code, length, 0);
+        InfHuff_FillTableWithRepetitions(table, 256, huffman, length, codelen->code, 0);
         huffman = InfHuff_RevIncrement(huffman,length);
         codelen = codelen->next;
         length  = codelen!=NULL ? codelen->length : 0;
