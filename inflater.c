@@ -59,6 +59,33 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
 
 /*====================================================================================================================*/
+#   pragma mark - REVERSE BITS
+
+static const unsigned char InfHuff_ReverseArray[256] = {
+  0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0,
+  0x08, 0x88, 0x48, 0xC8, 0x28, 0xA8, 0x68, 0xE8, 0x18, 0x98, 0x58, 0xD8, 0x38, 0xB8, 0x78, 0xF8,
+  0x04, 0x84, 0x44, 0xC4, 0x24, 0xA4, 0x64, 0xE4, 0x14, 0x94, 0x54, 0xD4, 0x34, 0xB4, 0x74, 0xF4,
+  0x0C, 0x8C, 0x4C, 0xCC, 0x2C, 0xAC, 0x6C, 0xEC, 0x1C, 0x9C, 0x5C, 0xDC, 0x3C, 0xBC, 0x7C, 0xFC,
+  0x02, 0x82, 0x42, 0xC2, 0x22, 0xA2, 0x62, 0xE2, 0x12, 0x92, 0x52, 0xD2, 0x32, 0xB2, 0x72, 0xF2,
+  0x0A, 0x8A, 0x4A, 0xCA, 0x2A, 0xAA, 0x6A, 0xEA, 0x1A, 0x9A, 0x5A, 0xDA, 0x3A, 0xBA, 0x7A, 0xFA,
+  0x06, 0x86, 0x46, 0xC6, 0x26, 0xA6, 0x66, 0xE6, 0x16, 0x96, 0x56, 0xD6, 0x36, 0xB6, 0x76, 0xF6,
+  0x0E, 0x8E, 0x4E, 0xCE, 0x2E, 0xAE, 0x6E, 0xEE, 0x1E, 0x9E, 0x5E, 0xDE, 0x3E, 0xBE, 0x7E, 0xFE,
+  0x01, 0x81, 0x41, 0xC1, 0x21, 0xA1, 0x61, 0xE1, 0x11, 0x91, 0x51, 0xD1, 0x31, 0xB1, 0x71, 0xF1,
+  0x09, 0x89, 0x49, 0xC9, 0x29, 0xA9, 0x69, 0xE9, 0x19, 0x99, 0x59, 0xD9, 0x39, 0xB9, 0x79, 0xF9,
+  0x05, 0x85, 0x45, 0xC5, 0x25, 0xA5, 0x65, 0xE5, 0x15, 0x95, 0x55, 0xD5, 0x35, 0xB5, 0x75, 0xF5,
+  0x0D, 0x8D, 0x4D, 0xCD, 0x2D, 0xAD, 0x6D, 0xED, 0x1D, 0x9D, 0x5D, 0xDD, 0x3D, 0xBD, 0x7D, 0xFD,
+  0x03, 0x83, 0x43, 0xC3, 0x23, 0xA3, 0x63, 0xE3, 0x13, 0x93, 0x53, 0xD3, 0x33, 0xB3, 0x73, 0xF3,
+  0x0B, 0x8B, 0x4B, 0xCB, 0x2B, 0xAB, 0x6B, 0xEB, 0x1B, 0x9B, 0x5B, 0xDB, 0x3B, 0xBB, 0x7B, 0xFB,
+  0x07, 0x87, 0x47, 0xC7, 0x27, 0xA7, 0x67, 0xE7, 0x17, 0x97, 0x57, 0xD7, 0x37, 0xB7, 0x77, 0xF7,
+  0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF, 0x3F, 0xBF, 0x7F, 0xFF
+};
+
+
+#define InfHuff_Reverse(huffman, length) (                                                        \
+  ((InfHuff_ReverseArray[huffman&0xFF]<<8) | (InfHuff_ReverseArray[huffman>>8])) >> (16-(length)) \
+)
+
+/*====================================================================================================================*/
 #   pragma mark - HUFFMAN DECODER
 
 /**
@@ -90,12 +117,14 @@ static void InfHuff_FillTableWithRepetitions(InfHuff*  table,
                                              unsigned  byte,
                                              unsigned  discardedBits)
 {
-    unsigned unknownBits; InfHuff data;
-    const unsigned knownHuffman = huffman >> discardedBits;
+    unsigned unknownBits, knownHuffman; InfHuff data;
     const unsigned unknownStep  = (1<<(huffmanLength-discardedBits));
     assert( table!=NULL && huffmanLength>discardedBits && huffman<(1<<huffmanLength) );
     
+    huffman = InfHuff_Reverse(huffman, huffmanLength);
     InfHuff_Set(data, huffman, huffmanLength, byte);
+    
+    knownHuffman = huffman >> discardedBits;
     for (unknownBits=0; unknownBits<tableSize; unknownBits+=unknownStep) {
         table[ unknownBits | knownHuffman ] = data;
     }
@@ -117,7 +146,8 @@ static int InfHuff_MakeSubTable(InfHuff*           subtable,
     huffman = firstHuffman;
     for ( codelen=codelen_begin; codelen!=codelen_end; codelen=codelen->next ) {
         const unsigned length = codelen->length;
-        InfHuff_FillTableWithRepetitions(subtable, subtableSize, huffman, length, codelen->code, 8);
+        InfHuff_FillTableWithRepetitions(subtable, subtableSize,
+                                         InfHuff_Reverse(huffman,length), length, codelen->code, 8);
         huffman = InfHuff_RevIncrement(huffman,length);
     }
     return subtableSize;
@@ -133,23 +163,24 @@ static int InfHuff_MakeSubTable(InfHuff*           subtable,
 const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen) {
     static const InfHuff invalid = InfHuff_Const(0, Inf_InvalidLength);
     InfHuff data; int i, insertIndex; const InfCodelen *codelen, *codelen_begin, *codelen_end;
-    unsigned huffman, length, subtableSize;
+    unsigned huffman, huffmanLength, subtableSize;
     assert( table!=NULL && firstCodelen!=NULL  );
     
     /* reset the main-table */
     for (i=0; i<Inf_MainTableSize; ++i) { table[i] = invalid; }
     
-    huffman = 0;
-    codelen = firstCodelen;
-    length  = codelen->length;
+    codelen       = firstCodelen;
+    huffman       = 0;
+    huffmanLength = codelen->length;
 
     /* lengths from 1 to 8                              */
     /* unknown bits are filled with all possible values */
-    while ( codelen!=NULL && length<=8 ) {
-        InfHuff_FillTableWithRepetitions(table, 256, huffman, length, codelen->code, 0);
-        huffman = InfHuff_RevIncrement(huffman,length);
-        codelen = codelen->next;
-        length  = codelen!=NULL ? codelen->length : 0;
+    while ( codelen!=NULL && huffmanLength<=8 ) {
+        InfHuff_FillTableWithRepetitions(table, 256,
+                                         InfHuff_Reverse(huffman,huffmanLength), huffmanLength, codelen->code, 0);
+        codelen       = codelen->next;
+        huffman       = InfHuff_RevIncrement(huffman,huffmanLength);
+        huffmanLength = codelen!=NULL ? codelen->length : 0;
     }
     /* lengths from 9         */
     /* subtables are created  */
@@ -157,18 +188,18 @@ const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen)
     codelen_begin = codelen;
     codelen_end   = codelen;
     while ( codelen_begin!=NULL ) {
-        const unsigned firstHuffman  = huffman;
+        const unsigned firstHuffman = huffman;
         do {
-            length      = codelen_end->length;
-            huffman     = InfHuff_RevIncrement(huffman,length);
-            codelen_end = codelen_end->next;
+            huffmanLength = codelen_end->length;
+            huffman       = InfHuff_RevIncrement(huffman,huffmanLength);
+            codelen_end   = codelen_end->next;
         } while ( codelen_end!=NULL && (huffman&0xFF)==(firstHuffman&0xFF) );
         
-        subtableSize = (1<<(length-8));
+        subtableSize = (1<<(huffmanLength-8));
         table[firstHuffman&0xFF] = InfHuff_SubTableRef(data, insertIndex, subtableSize-1);
         assert( insertIndex+subtableSize <= Inf_HuffTableSize );
         insertIndex += InfHuff_MakeSubTable(&table[insertIndex], subtableSize,
-                                            firstHuffman, length,
+                                            firstHuffman, huffmanLength,
                                             codelen_begin, codelen_end);
         codelen_begin = codelen_end;
     }
