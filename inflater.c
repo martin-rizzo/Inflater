@@ -95,7 +95,7 @@ static void InfHuff_FillTableWithRepetitions(InfHuff*  table,
     const unsigned unknownStep  = (1<<(huffmanLength-discardedBits));
     assert( table!=NULL && huffmanLength>discardedBits && huffman<(1<<huffmanLength) );
     
-    InfHuff_Set(data,byte,huffmanLength);
+    InfHuff_Set(data, huffman, huffmanLength, byte);
     for (unknownBits=0; unknownBits<tableSize; unknownBits+=unknownStep) {
         table[ unknownBits | knownHuffman ] = data;
     }
@@ -105,25 +105,22 @@ static void InfHuff_FillTableWithRepetitions(InfHuff*  table,
  * Makes a huffman 'SUB' table to be used in fast extraction from bitstream
  */
 static int InfHuff_MakeSubTable(InfHuff*           subtable,
-                                int                availableEntries,
+                                unsigned           subtableSize,
                                 unsigned           firstHuffman,
                                 unsigned           maxLength,
                                 const InfCodelen*  codelen_begin,
                                 const InfCodelen*  codelen_end)
 {
-    static const unsigned DiscardedBits = 8; /**< number of bits discarded by the subtable */
-    const int numberOfEntries = 1<<(maxLength-DiscardedBits);
     unsigned huffman; const InfCodelen* codelen;
-    
-    assert( subtable!=NULL && numberOfEntries<=availableEntries  );
+    assert( subtable!=NULL && subtableSize<=Inf_HuffTableSize  );
     
     huffman = firstHuffman;
     for ( codelen=codelen_begin; codelen!=codelen_end; codelen=codelen->next ) {
         const unsigned length = codelen->length;
-        InfHuff_FillTableWithRepetitions(subtable, numberOfEntries, huffman, length, codelen->code, DiscardedBits);
+        InfHuff_FillTableWithRepetitions(subtable, subtableSize, huffman, length, codelen->code, 8);
         huffman = InfHuff_RevIncrement(huffman,length);
     }
-    return numberOfEntries;
+    return subtableSize;
 }
 
 /**
@@ -136,7 +133,7 @@ static int InfHuff_MakeSubTable(InfHuff*           subtable,
 const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen) {
     static const InfHuff invalid = InfHuff_Const(0, Inf_InvalidLength);
     InfHuff data; int i, insertIndex; const InfCodelen *codelen, *codelen_begin, *codelen_end;
-    unsigned huffman, length;
+    unsigned huffman, length, subtableSize;
     assert( table!=NULL && firstCodelen!=NULL  );
     
     /* reset the main-table */
@@ -167,9 +164,11 @@ const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen)
             codelen_end = codelen_end->next;
         } while ( codelen_end!=NULL && (huffman&0xFF)==(firstHuffman&0xFF) );
         
-        table[firstHuffman] = InfHuff_SubTableRef(data, insertIndex, (1<<(length-8))-1);
-        insertIndex += InfHuff_MakeSubTable(&table[insertIndex],
-                                            (Inf_HuffTableSize-insertIndex),
+        subtableSize = (1<<(length-8));
+        table[firstHuffman] = InfHuff_SubTableRef(data, insertIndex, subtableSize-1);
+        assert( firstHuffman<=255 );
+        assert( insertIndex+subtableSize <= Inf_HuffTableSize );
+        insertIndex += InfHuff_MakeSubTable(&table[insertIndex], subtableSize,
                                             firstHuffman, length,
                                             codelen_begin, codelen_end);
         codelen_begin = codelen_end;
@@ -657,7 +656,6 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 writePtr     += numberOfBytes;
                 if      ( !canReadAll    ) { inf__FILL_INPUT_BUFFER();         }
                 else if ( inf._seq_len>0 ) { inf__USE_OUTPUT_BUFFER_CONTENT(); }
-                
                 assert( inf._seq_len==0 );
                 inf__goto(InfStep_ProcessNextBlock);
 

@@ -78,11 +78,6 @@ typedef struct InfData {
     size_t      bufferSize;
 } InfData;
 
-typedef union InfHuff {
-    struct value    { unsigned length:15, isvalid:1,  code:15; } value;
-    struct subtable { unsigned   mask:15,   error:1, index:15; } subtable;
-    unsigned raw;
-} InfHuff;
 
 typedef struct InfCodelen {
     unsigned           code;
@@ -90,7 +85,14 @@ typedef struct InfCodelen {
     struct InfCodelen* next;
 } InfCodelen;
 
-#define InfHuff_Set(s, code_,length_) s.value.code=code_; s.value.isvalid=1; s.value.length=length_
+
+typedef union InfHuff {
+    struct value    { unsigned length:15, isvalid:1,  code:15; } value;
+    struct subtable { unsigned   mask:15,   error:1, index:15; } subtable;
+    unsigned raw;
+} InfHuff;
+
+#define InfHuff_Set(s, huff, hufflen, byte) s.value.code=byte; s.value.isvalid=1; s.value.length=hufflen
 #define InfHuff_SubTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
 #define InfHuff_Const(code_,length_) { length_, 1, code_ }
 
