@@ -165,8 +165,7 @@ const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen)
         } while ( codelen_end!=NULL && (huffman&0xFF)==(firstHuffman&0xFF) );
         
         subtableSize = (1<<(length-8));
-        table[firstHuffman] = InfHuff_SubTableRef(data, insertIndex, subtableSize-1);
-        assert( firstHuffman<=255 );
+        table[firstHuffman&0xFF] = InfHuff_SubTableRef(data, insertIndex, subtableSize-1);
         assert( insertIndex+subtableSize <= Inf_HuffTableSize );
         insertIndex += InfHuff_MakeSubTable(&table[insertIndex], subtableSize,
                                             firstHuffman, length,
