@@ -234,21 +234,21 @@ static InfBool InfBS_ReadDWord(Inflater* infptr, unsigned* dest) {
     inf.bitcounter  -= bitsToSkip;
     while ( inf.bitcounter <numberOfBitsToRead ) { if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; } }
     assert( inf.bitcounter==numberOfBitsToRead );
-    (*dest) = (inf.bitbuffer>>24 & 0x000000FF) | (inf.bitbuffer>>8 & 0x0000FF00) | (inf.bitbuffer<<8 & 0x00FF0000) | (inf.bitbuffer<<24 & 0xFF000000);
+    (*dest) = inf.bitbuffer;
     inf.bitbuffer  = inf.bitcounter = 0;
     return Inf_TRUE;
 }
 
 /** Reads a sequence of bytes directly from the input stream (bitbuffer must be empty) */
 static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* inout_numberOfBytes) {
-    size_t numberOfBytesToRead, successfulBytes;
+    size_t numberOfRequestedBytes, successfulBytes;
     assert( infptr!=NULL && dest!=NULL && inout_numberOfBytes!=NULL && inf.bitcounter==0 );
-    numberOfBytesToRead = (*inout_numberOfBytes);
-    successfulBytes     = min( (inf.inputChunkEnd-inf.inputChunkPtr), numberOfBytesToRead );
+    numberOfRequestedBytes = (*inout_numberOfBytes);
+    successfulBytes        = min( numberOfRequestedBytes, (inf.inputChunkEnd-inf.inputChunkPtr) );
     memcpy(dest, inf.inputChunkPtr, successfulBytes);
     inf.inputChunkPtr += successfulBytes;
     (*inout_numberOfBytes) = successfulBytes;
-    return (successfulBytes == numberOfBytesToRead);
+    return (successfulBytes == numberOfRequestedBytes);
 }
 
 
@@ -593,7 +593,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
     }
 
     assert( inf.inputChunkPtr!=NULL );
-    assert( inf.inputChunkPtr<inf.inputChunkEnd );
+    assert( inf.inputChunkPtr<=inf.inputChunkEnd );
     assert( inf.outputChunk!=NULL && inf.outputChunk<writeEnd );
     assert( outputBuffer!=NULL );
     assert( outputBufferSize>=(32*1024) );
@@ -646,17 +646,17 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              */
             case InfStep_Process_UncompressedBlock:
                 if ( !InfBS_ReadDWord(infptr,&temp) ) { inf__FILL_INPUT_BUFFER(); }
-                inf._seq_len = (temp >> 16);
-                if ( inf._seq_len != ((~temp)&0xFFFF) ) { inf__ERROR(InfError_BadBlockLength); }
+                inf._seq_len = (temp & 0xFFFF);
+                if ( inf._seq_len != ((~temp)>>16) ) { inf__ERROR(InfError_BadBlockLength); }
                 inf__fallthrough(InfStep_Output_UncompressedBlock);
                 
             case InfStep_Output_UncompressedBlock:
-                numberOfBytes = min( (writeEnd-writePtr), inf._seq_len );
+                numberOfBytes = min( inf._seq_len, (writeEnd-writePtr) );
                 canReadAll    = InfBS_ReadBytes(infptr, writePtr, &numberOfBytes);
                 inf._seq_len -= numberOfBytes;
                 writePtr     += numberOfBytes;
-                if ( inf._seq_len>0 )   { inf__USE_OUTPUT_BUFFER_CONTENT(); }
-                else if ( !canReadAll ) { inf__FILL_INPUT_BUFFER();         }
+                if      ( !canReadAll    ) { inf__FILL_INPUT_BUFFER();         }
+                else if ( inf._seq_len>0 ) { inf__USE_OUTPUT_BUFFER_CONTENT(); }
                 
                 assert( inf._seq_len==0 );
                 inf__goto(InfStep_ProcessNextBlock);
