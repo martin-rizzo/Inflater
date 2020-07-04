@@ -90,6 +90,11 @@ static const unsigned char Inf_Reverse[256] = {
   ((InfHuff_ReverseArray[huffman&0xFF]<<8) | (InfHuff_ReverseArray[huffman>>8])) >> (16-(length)) \
 )
 
+#define InfHuff_NextCanonical(huffman, currentLength, newLength)  \
+    huffman       = (huffman+1) << (newLength - currentLength);   \
+    huffmanLength = newLength                                     \
+
+
 /**
  * Fills the huffman table
  * @param table            Pointer to the huffman table (or sub-table) to fill
@@ -134,13 +139,8 @@ static int InfHuff_MakeSubTable(InfHuff*           subtable,
     huffman       = firstHuffman;
     huffmanLength = codelen_begin->length;
     while ( codelen!=codelen_end ) {
-        InfHuff_FillTableWithRepetitions(subtable, subtableSize,
-                                         huffman, huffmanLength, codelen->code, 8);
-        codelen = codelen->next;
-        if (codelen) {
-            huffman       = (huffman+1) << (codelen->length - huffmanLength);
-            huffmanLength = codelen->length;
-        }
+        InfHuff_FillTableWithRepetitions(subtable, subtableSize, huffman, huffmanLength, codelen->code, 8);
+        if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
     }
     return subtableSize;
 }
@@ -168,13 +168,8 @@ const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen)
     /* lengths from 1 to 8                              */
     /* unknown bits are filled with all possible values */
     while ( codelen!=NULL && huffmanLength<=8 ) {
-        InfHuff_FillTableWithRepetitions(table, 256,
-                                         huffman, huffmanLength, codelen->code, 0);
-        codelen = codelen->next;
-        if (codelen) {
-            huffman       = (huffman+1) << (codelen->length - huffmanLength);
-            huffmanLength = codelen->length;
-        }
+        InfHuff_FillTableWithRepetitions(table, 256, huffman, huffmanLength, codelen->code, 0);
+        if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
     }
     /* lengths from 9         */
     /* subtables are created  */
@@ -183,17 +178,12 @@ const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen)
     while ( codelen_begin!=NULL ) {
         const unsigned firstHuffman = huffman;
         const unsigned index        = huffman >> (huffmanLength-8);
-        unsigned maxHuffmanLength;
         do {
-            maxHuffmanLength = huffmanLength;
-            codelen = codelen->next;
-            if (codelen) {
-                huffman       = (huffman+1) << (codelen->length - huffmanLength);
-                huffmanLength = codelen->length;
-            }
+            subtableSize = huffmanLength;
+            if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
         } while ( codelen!=NULL && (huffman>>(huffmanLength-8))==index );
+        subtableSize = (1<<(subtableSize-8));
         
-        subtableSize = (1<<(maxHuffmanLength-8));
         table[Inf_Reverse[index]] = InfHuff_SubTableRef(data, subtableIndex, subtableSize-1);
         assert( subtableIndex+subtableSize <= Inf_HuffTableSize );
         subtableIndex += InfHuff_MakeSubTable(&table[subtableIndex], subtableSize,
