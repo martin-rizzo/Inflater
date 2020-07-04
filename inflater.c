@@ -124,44 +124,22 @@ static void InfHuff_FillTableWithRepetitions(InfHuff*  table,
 }
 
 /**
- * Makes a huffman 'SUB' table to be used in fast extraction from bitstream
- */
-static int InfHuff_MakeSubTable(InfHuff*           subtable,
-                                unsigned           subtableSize,
-                                unsigned           firstHuffman,
-                                const InfCodelen*  codelen_begin,
-                                const InfCodelen*  codelen_end)
-{
-    unsigned huffman, huffmanLength; const InfCodelen* codelen;
-    assert( subtable!=NULL && subtableSize<=Inf_HuffTableSize && codelen_begin!=NULL );
-    
-    codelen       = codelen_begin;
-    huffman       = firstHuffman;
-    huffmanLength = codelen_begin->length;
-    while ( codelen!=codelen_end ) {
-        InfHuff_FillTableWithRepetitions(subtable, subtableSize, huffman, huffmanLength, codelen->code, 8);
-        if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
-    }
-    return subtableSize;
-}
-
-/**
  * Makes a huffman table to be used in fast extraction from bitstream
- * @param table         Pointer to the huffman table to fill
- * @param firstCodelen  The first element of a list containing `code-length` data sorted by length
+ * @param table    Pointer to the huffman table to fill
+ * @param codelen  The first element of a list containing `code-length` data sorted by length
  * @returns
  *      The same table pointer provided in the first parameter.
  */
-const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen) {
+const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *codelen) {
     static const InfHuff invalid = InfHuff_Const(0, Inf_InvalidLength);
-    InfHuff data; int i, subtableIndex; const InfCodelen *codelen, *codelen_begin;
+    InfHuff data; int i, subtableIndex; const InfCodelen *codelen_end;
     unsigned subtableSize, huffman, huffmanLength;
-    assert( table!=NULL && firstCodelen!=NULL  );
+    assert( table!=NULL && codelen!=NULL  );
     
     /* reset the main-table */
     for (i=0; i<Inf_MainTableSize; ++i) { table[i] = invalid; }
     
-    codelen       = firstCodelen;
+    /* init huffman canonical code */
     huffman       = 0;
     huffmanLength = codelen->length;
 
@@ -174,21 +152,30 @@ const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *firstCodelen)
     /* lengths from 9         */
     /* subtables are created  */
     subtableIndex = Inf_MainTableSize;
-    codelen_begin = codelen;
-    while ( codelen_begin!=NULL ) {
-        const unsigned firstHuffman = huffman;
-        const unsigned index        = huffman >> (huffmanLength-8);
+    while ( codelen!=NULL )
+    {
+        const InfCodelen* const codelen_first = codelen;
+        const unsigned          huffman_first = huffman;
+        const unsigned          index         = huffman >> (huffmanLength-8);
+        
+        /* calculate subtable size (and find first and last element) */
         do {
             subtableSize = huffmanLength;
             if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
         } while ( codelen!=NULL && (huffman>>(huffmanLength-8))==index );
+        codelen_end  = codelen;
         subtableSize = (1<<(subtableSize-8));
-        
-        table[Inf_Reverse[index]] = InfHuff_SubTableRef(data, subtableIndex, subtableSize-1);
         assert( subtableIndex+subtableSize <= Inf_HuffTableSize );
-        subtableIndex += InfHuff_MakeSubTable(&table[subtableIndex], subtableSize,
-                                              firstHuffman, codelen_begin, codelen);
-        codelen_begin = codelen;
+        
+        /* create subtable */
+        huffman       = huffman_first;
+        huffmanLength = codelen_first->length;
+        table[Inf_Reverse[index]] = InfHuff_SubTableRef(data, subtableIndex, subtableSize-1);
+        codelen = codelen_first; while ( codelen!=codelen_end ) {
+            InfHuff_FillTableWithRepetitions(&table[subtableIndex], subtableSize, huffman, huffmanLength, codelen->code, 8);
+            if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
+        }
+        subtableIndex += subtableSize;
     }
     return table;
 }
