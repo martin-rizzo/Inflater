@@ -40,8 +40,6 @@
 static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
 
-#define Inf_MainTableSize 256      /**< 8bits                        */
-#define Inf_HuffTableSize  (2*1024) /**< main-table + all sub-tables  */
 #define Inf_LastValidLength 18
 #define Inf_InvalidLength   24
 #define Inf_MaxNumberOfCodes 19
@@ -265,13 +263,12 @@ static void InfCL_Add(Inflater* infptr, int code, unsigned length) {
     if (length>0) {
         InfCodelen* const newElement = &inf.clList.elements[ inf.clList.index++ ];
         InfCodelen* const last       = inf.clList.tailPtr[length];
+        if (last) { last->next = newElement; } else { inf.clList.headPtr[length] = newElement; }
         newElement->code   = code;
         newElement->length = length;
         newElement->next   = NULL;
         inf.clList.tailPtr[length] = newElement;
-        if (last) { last->next                 = newElement; }
-        else      { inf.clList.headPtr[length] = newElement; }
-    }                                                                 \
+    }
 }
 
 static void InfCL_AddRange(Inflater* infptr, int firstCode, int lastCode, unsigned length) {
@@ -451,12 +448,6 @@ typedef enum InfStep {
     InfStep_FatalError,
     InfStep_End
 } InfStep;
-
-
-/* TODO: remove these globals! */
-static InfHuff huffmanTable0[Inf_HuffTableSize];
-static InfHuff huffmanTable1[Inf_HuffTableSize];
-static InfHuff huffmanTable2[Inf_HuffTableSize];
 
 
 static InfHuff* getFixedLiteralDecoder(Inflater* infptr) {
@@ -690,7 +681,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_FrontHuffmanTable2:
                 if ( !InfCL_ReadCodes(infptr,inf._hclen+4) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.frontDecoder = InfHuff_MakeTable(huffmanTable0, InfCL_Close(infptr));
+                inf.frontDecoder = InfHuff_MakeTable(inf.huffmanTable1, InfCL_Close(infptr));
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
             /*----------------------------------
@@ -702,7 +693,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_LiteralHuffmanTable2:
                 if ( !InfCL_ReadCompressedCodes(infptr,inf._hlit+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.literalDecoder = InfHuff_MakeTable(huffmanTable1, InfCL_Close(infptr));
+                inf.literalDecoder = InfHuff_MakeTable(inf.huffmanTable0, InfCL_Close(infptr));
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
             /*----------------------------------
@@ -714,7 +705,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_DistanceHuffmanTable2:
                 if ( !InfCL_ReadCompressedCodes(infptr,inf._hdist+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.distanceDecoder = InfHuff_MakeTable(huffmanTable2, InfCL_Close(infptr));
+                inf.distanceDecoder = InfHuff_MakeTable(inf.huffmanTable1, InfCL_Close(infptr));
                 inf__fallthrough(InfStep_Process_CompressedBlock);
                 
             /*-------------------------------------------------------------------------------------

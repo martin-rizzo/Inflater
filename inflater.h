@@ -47,6 +47,9 @@
 #define Inf_NextIndexMask        0x03FF
 
 
+#define Inf_MainTableSize 256       /**< 8bits                        */
+#define Inf_HuffTableSize  (2*1024) /**< main-table + all sub-tables  */
+
 
 typedef enum InfError {
     InfError_BadBlockContent = -8,     /**< The content of block is invalid */
@@ -165,9 +168,11 @@ typedef struct Inflater {
     } cl;
 
 
-    const union InfHuff* frontDecoder;     /**< The base decoder used to decode the next 2 decoders (it's crazy!) */
-    const union InfHuff* literalDecoder;   /**< The literal+length huffman decoder  */
-    const union InfHuff* distanceDecoder;  /**< The distance huffman decoder        */
+    const union InfHuff* frontDecoder;        /**< The base decoder used to decode the next 2 decoders (it's crazy!) */
+    const union InfHuff* literalDecoder;      /**< The literal+length huffman decoder  */
+    const union InfHuff* distanceDecoder;     /**< The distance huffman decoder        */
+    InfHuff huffmanTable0[Inf_HuffTableSize];
+    InfHuff huffmanTable1[Inf_HuffTableSize];
 
 } Inflater;
 
