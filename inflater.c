@@ -123,55 +123,55 @@ static void InfHuff_FillTable(InfHuff*  table,
 
 /**
  * Makes a huffman table to be used in fast extraction from bitstream
- * @param table    Pointer to the huffman table to fill
- * @param codelen  The first element of a list containing `code-length` data sorted by length
+ * @param table   Pointer to the huffman table to fill
+ * @param symlen  The first element of a list containing `symbol-length` data sorted by length
  * @returns
  *      The same table pointer provided in the first parameter.
  */
-const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfCodelen *codelen) {
+const InfHuff* InfHuff_MakeTable(InfHuff* table, const InfSymlen *symlen) {
     static const InfHuff invalid = InfHuff_Const(0, Inf_InvalidLength);
-    InfHuff data; int i, subtableIndex; const InfCodelen *codelen_end;
+    InfHuff data; int i, subtableIndex; const InfSymlen *symlen_end;
     unsigned subtableSize, huffman, huffmanLength;
-    assert( table!=NULL && codelen!=NULL  );
+    assert( table!=NULL && symlen!=NULL  );
     
     /* reset the main-table */
     for (i=0; i<Inf_MainTableSize; ++i) { table[i] = invalid; }
     
     /* init huffman canonical code */
     huffman       = 0;
-    huffmanLength = codelen->length;
+    huffmanLength = symlen->huffmanLength;
 
     /* lengths from 1 to 8                              */
     /* unknown bits are filled with all possible values */
-    while ( codelen!=NULL && huffmanLength<=8 ) {
-        InfHuff_FillTable(table, 256, huffman, huffmanLength, codelen->code, 0);
-        if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
+    while ( symlen!=NULL && huffmanLength<=8 ) {
+        InfHuff_FillTable(table, 256, huffman, huffmanLength, symlen->symbol, 0);
+        if ( (symlen=symlen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
     }
     /* lengths from 9         */
     /* subtables are created  */
     subtableIndex = Inf_MainTableSize;
-    while ( codelen!=NULL )
+    while ( symlen!=NULL )
     {
-        const InfCodelen* const codelen_first = codelen;
-        const unsigned          huffman_first = huffman;
-        const unsigned          index         = huffman >> (huffmanLength-8);
+        const InfSymlen* const symlen_first  = symlen;
+        const unsigned         huffman_first = huffman;
+        const unsigned         index         = huffman >> (huffmanLength-8);
         
         /* calculate subtable size (and find first and last element) */
         do {
             subtableSize = huffmanLength;
-            if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
-        } while ( codelen!=NULL && (huffman>>(huffmanLength-8))==index );
-        codelen_end  = codelen;
+            if ( (symlen=symlen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
+        } while ( symlen!=NULL && (huffman>>(huffmanLength-8))==index );
+        symlen_end   = symlen;
         subtableSize = (1<<(subtableSize-8));
         assert( subtableIndex+subtableSize <= Inf_HuffTableSize );
         
         /* create subtable */
         huffman       = huffman_first;
-        huffmanLength = codelen_first->length;
+        huffmanLength = symlen_first->huffmanLength;
         table[Inf_Reverse[index]] = InfHuff_SubTableRef(data, subtableIndex, subtableSize-1);
-        codelen = codelen_first; while ( codelen!=codelen_end ) {
-            InfHuff_FillTable(&table[subtableIndex], subtableSize, huffman, huffmanLength, codelen->code, 8);
-            if ( (codelen=codelen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, codelen->length); }
+        symlen = symlen_first; while ( symlen!=symlen_end ) {
+            InfHuff_FillTable(&table[subtableIndex], subtableSize, huffman, huffmanLength, symlen->symbol, 8);
+            if ( (symlen=symlen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
         }
         subtableIndex += subtableSize;
     }
@@ -257,28 +257,28 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 #   pragma mark - READING CODE/LENGTHS PAIRS
 
 
-static void InfCL_Add(Inflater* infptr, int code, unsigned length) {
-    assert( 0<=code   &&   code<=Inf_LastValidCode   );
-    assert( 0<=length && length<=Inf_LastValidLength );
-    if (length>0) {
-        InfCodelen* const newElement = &inf.clList.elements[ inf.clList.index++ ];
-        InfCodelen* const last       = inf.clList.tailPtr[length];
-        if (last) { last->next = newElement; } else { inf.clList.headPtr[length] = newElement; }
-        newElement->code   = code;
-        newElement->length = length;
-        newElement->next   = NULL;
-        inf.clList.tailPtr[length] = newElement;
+static void InfCL_Add(Inflater* infptr, int symbol, unsigned huffmanLength) {
+    assert( 0<=symbol        &&        symbol<=Inf_LastValidSymbol );
+    assert( 0<=huffmanLength && huffmanLength<=Inf_LastValidLength );
+    if (huffmanLength>0) {
+        InfSymlen* const newSymlen = &inf.clList.elements[ inf.clList.index++ ];
+        InfSymlen* const last       = inf.clList.tailPtr[huffmanLength];
+        if (last) { last->next = newSymlen; } else { inf.clList.headPtr[huffmanLength] = newSymlen; }
+        newSymlen->symbol        = symbol;
+        newSymlen->huffmanLength = huffmanLength;
+        newSymlen->next   = NULL;
+        inf.clList.tailPtr[huffmanLength] = newSymlen;
     }
 }
 
-static void InfCL_AddRange(Inflater* infptr, int firstCode, int lastCode, unsigned length) {
-    int code;
+static void InfCL_AddRange(Inflater* infptr, int firstSymbol, int lastSymbol, unsigned huffmanLength) {
+    int symbol;
     assert( infptr!=NULL );
-    assert( 0<=firstCode && firstCode<=(Inf_LastValidCode)   );
-    assert( 0<=lastCode  &&  lastCode<=(Inf_LastValidCode+1) );
-    assert( firstCode<=lastCode );
-    for (code=firstCode; code<lastCode; ++code) {
-        InfCL_Add(infptr, code,length);
+    assert( 0<=firstSymbol && firstSymbol<=(Inf_LastValidSymbol)   );
+    assert( 0<=lastSymbol  &&  lastSymbol<=(Inf_LastValidSymbol+1) );
+    assert( firstSymbol<=lastSymbol );
+    for (symbol=firstSymbol; symbol<lastSymbol; ++symbol) {
+        InfCL_Add(infptr, symbol, huffmanLength);
     }
 }
 
@@ -293,10 +293,10 @@ static void InfCL_Open(Inflater* infptr, InfBool resetRepetitions) {
     }
 }
 
-static const InfCodelen* InfCL_Close(Inflater* infptr) {
+static const InfSymlen* InfCL_Close(Inflater* infptr) {
     int lastValidLength = 0;
     int currentLength   = 0;
-    InfCodelen *firstElement, *currentHead;
+    InfSymlen *firstElement, *currentHead;
     
     /* connect all lists creating a big one sorted by `length` */
     while (inf.clList.headPtr[currentLength]==NULL) { ++currentLength; }

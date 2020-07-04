@@ -42,8 +42,8 @@
 #define Inf_MaxValidLengthCode   285
 #define Inf_MaxValidDistanceCode 29
 #define Inf_LastValidLength      18
-#define Inf_LastValidCode        290
-#define Inf_CodeLengthMapSize    ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
+#define Inf_LastValidSymbol      290
+#define Inf_CodeLengthMapSize    ((Inf_LastValidLength+1)+(Inf_LastValidSymbol+1))
 #define Inf_NextIndexMask        0x03FF
 
 
@@ -82,11 +82,11 @@ typedef struct InfData {
 } InfData;
 
 
-typedef struct InfCodelen {
-    unsigned           code;
-    unsigned           length;
-    struct InfCodelen* next;
-} InfCodelen;
+typedef struct InfSymlen {
+    unsigned           symbol;        /**< The decompressed value assigned to the huffman code */
+    unsigned           huffmanLength; /**< The huffman code length (in number of bits)         */
+    struct InfSymlen* next;
+} InfSymlen;
 
 
 typedef union InfHuff {
@@ -151,12 +151,12 @@ typedef struct Inflater {
     unsigned _seq_dist;
     unsigned _seq_len;
     
-    /* HIDDEN: code lengths reader */
+    /* HIDDEN: symbol-length reader */
     struct {
-        InfCodelen* tailPtr[Inf_LastValidLength+1];
-        InfCodelen* headPtr[Inf_LastValidLength+1];
-        InfCodelen  elements[Inf_LastValidCode+1];
-        int         index;
+        InfSymlen* tailPtr[Inf_LastValidLength+1];
+        InfSymlen* headPtr[Inf_LastValidLength+1];
+        InfSymlen  elements[Inf_LastValidSymbol+1];
+        int        index;
     } clList;
     struct {
         unsigned    command;
