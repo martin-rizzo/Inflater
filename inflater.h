@@ -157,7 +157,7 @@ typedef struct Inflater {
         InfSymlen* headPtr[Inf_LastValidLength+1];
         InfSymlen  elements[Inf_LastValidSymbol+1];
         int        index;
-    } clList;
+    } symlenList;
     struct {
         unsigned    command;
         unsigned    code;
