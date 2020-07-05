@@ -46,7 +46,7 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
 #define Inf_LastValidLength 18
 #define Inf_InvalidLength   24
-#define Inf_MaxNumberOfCodes 19
+#define Inf_SymlenSequenceSize 19
 #define Inf_CodeLengthTableSize ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
 
 #define inf (*infptr)
@@ -257,9 +257,8 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 /** Starts the creation of a symbol-length list (inf.symlenList) */
 static void InfSL_Open(Inflater* infptr, InfBool resetRepetitions) {
     int length;
-    if (resetRepetitions) { inf.cl.command = inf.cl.length = inf.cl.repetitions = 0; }
-    inf.cl.code      = 0;
-    inf.symlenList.index = 0;
+    if (resetRepetitions) { inf.reader.command = inf.reader.huffmanLength = inf.reader.repetitions=0; }
+    inf.symlenList.elementIndex = inf.reader.symbol = 0;
     for (length=0; length<=Inf_LastValidLength; ++length) {
         inf.symlenList.headPtr[length] = inf.symlenList.tailPtr[length] = NULL;
     }
@@ -270,7 +269,7 @@ static void InfSL_Add(Inflater* infptr, unsigned symbol, unsigned huffmanLength)
     assert( 0<=symbol        &&        symbol<=Inf_LastValidSymbol );
     assert( 0<=huffmanLength && huffmanLength<=Inf_LastValidLength );
     if (huffmanLength>0) {
-        InfSymlen* const newSymlen = &inf.symlenList.elements[ inf.symlenList.index++ ];
+        InfSymlen* const newSymlen = &inf.symlenList.elements[ inf.symlenList.elementIndex++ ];
         InfSymlen* const last       = inf.symlenList.tailPtr[huffmanLength];
         if (last) { last->next = newSymlen; } else { inf.symlenList.headPtr[huffmanLength] = newSymlen; }
         newSymlen->symbol        = symbol;
@@ -293,83 +292,87 @@ static void InfSL_AddRange(Inflater* infptr, unsigned firstSymbol, unsigned last
 }
 
 /** Adds 3bit lengths attached to a predefined sequence of symbols: 16, 17, 18, 0, 8, 7, 9, ... */
-static InfBool InfSL_ReadCodes(Inflater* infptr, unsigned numberOfCodes) {
-    static const unsigned order[Inf_MaxNumberOfCodes] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
-    const unsigned end = (numberOfCodes<Inf_MaxNumberOfCodes) ? numberOfCodes : Inf_MaxNumberOfCodes;
-    int i;
-    assert( infptr!=NULL && numberOfCodes>0 );
+static InfBool InfSL_ReadSymlenSequence(Inflater* infptr, unsigned numberOfSymbols) {
+    static const unsigned symbolOrder[Inf_SymlenSequenceSize] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
+    const unsigned end = (numberOfSymbols<Inf_SymlenSequenceSize) ? numberOfSymbols : Inf_SymlenSequenceSize;
+    unsigned symbol, length;
+    assert( infptr!=NULL && numberOfSymbols>0 );
     
-    while (inf.cl.code<end) {
-        unsigned length;
+    while (inf.reader.symbol<end) {
         if ( !InfBS_ReadBits(infptr,&length,3) ) { return Inf_FALSE; }
-        inf.cl.lengths[ order[inf.cl.code++] ] = length;
+        inf.reader.lengthsBySymbol[ symbolOrder[inf.reader.symbol++] ] = (unsigned char)length;
     }
-    while (inf.cl.code<Inf_MaxNumberOfCodes) { inf.cl.lengths[ order[inf.cl.code++] ] = 0; }
-    for (i=0; i<Inf_MaxNumberOfCodes; i++) { InfSL_Add(infptr, i, inf.cl.lengths[i]);  }
+    while (inf.reader.symbol<Inf_SymlenSequenceSize) {
+        inf.reader.lengthsBySymbol[ symbolOrder[inf.reader.symbol++] ] = 0;
+    }
+    for (symbol=0; symbol<Inf_SymlenSequenceSize; symbol++) {
+        length = (unsigned)inf.reader.lengthsBySymbol[symbol];
+        if (length>0) { InfSL_Add(infptr, symbol, length); }
+    }
     return Inf_TRUE;
 }
 
 /** Adds a sequence of symbol-length pairs reading and decimpressing data from the bitstream */
-static InfBool InfSL_ReadCompressedCodes(Inflater* infptr, unsigned numberOfCodes,  const InfHuff* table) {
-    enum Command {
-        Command_ReadNext            = 0,  /**< load next command                             */
-        Command_UseCommandAsLength  = 15, /**< length is the value stored in 'infcl.command' */
-        Command_CopyPreviousLength  = 16, /**< repeat the previous length                    */
-        Command_RepeatZeroLength_3  = 17, /**< repeat zero length (3 or more times)          */
-        Command_RepeatZeroLength_11 = 18  /**< repeat zero length (11 or more times)         */
+static InfBool InfSL_ReadCompressedSymlens(Inflater* infptr, unsigned numberOfSymbols, const InfHuff* table) {
+    enum InfCmd {
+        InfCmd_ReadNext            = 0,  /**< load next command                             */
+        InfCmd_UseCmdAsLength      = 15, /**< length is the value stored in 'infcl.command' */
+        InfCmd_CopyPreviousLength  = 16, /**< repeat the previous length                    */
+        InfCmd_RepeatZeroLength_3  = 17, /**< repeat zero length (3 or more times)          */
+        InfCmd_RepeatZeroLength_11 = 18  /**< repeat zero length (11 or more times)         */
     };
     unsigned value = 0;
-    assert( infptr!=NULL && numberOfCodes>0 && table!=NULL );
+    assert( infptr!=NULL && numberOfSymbols>0 && table!=NULL );
 
     /* IMPORTANT: add any repetition that is pending from a previous load (ex: literals-table > distance-table) */
-    while (inf.cl.code<numberOfCodes && inf.cl.repetitions>0) {
-        InfSL_Add(infptr, inf.cl.code, inf.cl.length);
-        ++inf.cl.code; --inf.cl.repetitions;
+    while (inf.reader.symbol<numberOfSymbols && inf.reader.repetitions>0) {
+        InfSL_Add(infptr, inf.reader.symbol, inf.reader.huffmanLength);
+        ++inf.reader.symbol; --inf.reader.repetitions;
     }
     
-    /* add (one by one) all codes with their codeLengths taking into account the number of repetitions */
-    while ( inf.cl.code<numberOfCodes ) {
-        assert( inf.cl.repetitions==0 );
+    /* add (one by one) all symbols with their corresponding huffmanLengths taking into account the number of repetitions */
+    while ( inf.reader.symbol<numberOfSymbols ) {
+        assert( inf.reader.repetitions==0 );
         
         /* read a new command */
-        if ( inf.cl.command==Command_ReadNext ) {
-            if ( !InfBS_ReadCompressedBits(infptr, &inf.cl.command, table) ) { return Inf_FALSE; }
+        if ( inf.reader.command == InfCmd_ReadNext ) {
+            if ( !InfBS_ReadCompressedBits(infptr, &inf.reader.command, table) ) { return Inf_FALSE; }
         }
         /* process simple command */
-        if ( inf.cl.command<=Command_UseCommandAsLength ) {
-            inf.cl.length=inf.cl.command;
-            InfSL_Add(infptr, inf.cl.code, inf.cl.length);
-            ++inf.cl.code;
+        if ( inf.reader.command <= InfCmd_UseCmdAsLength ) {
+            inf.reader.huffmanLength = inf.reader.command;
+            InfSL_Add(infptr, inf.reader.symbol, inf.reader.huffmanLength);
+            ++inf.reader.symbol;
         }
         /* process command with repetition */
         else {
-            switch (inf.cl.command) {
-                case Command_CopyPreviousLength:
-                    if (inf.cl.code==0) { /* codeLengths.markAsError(); */ return Inf_TRUE; }
+            switch (inf.reader.command) {
+                case InfCmd_CopyPreviousLength:
+                    if (inf.reader.symbol==0) { /* codeLengths.markAsError(); */ return Inf_TRUE; }
                     if ( !InfBS_ReadBits(infptr,&value,2) ) { return Inf_FALSE; }
-                    inf.cl.repetitions = 3 + value;
+                    inf.reader.repetitions = 3 + value;
                     break;
-                case Command_RepeatZeroLength_3:
+                case InfCmd_RepeatZeroLength_3:
                     if ( !InfBS_ReadBits(infptr,&value,3) ) { return Inf_FALSE; }
-                    inf.cl.length      = 0;
-                    inf.cl.repetitions = 3 + value;
+                    inf.reader.huffmanLength = 0;
+                    inf.reader.repetitions   = 3 + value;
                     break;
-                case Command_RepeatZeroLength_11:
+                case InfCmd_RepeatZeroLength_11:
                     if ( !InfBS_ReadBits(infptr,&value,7) ) { return Inf_FALSE; }
-                    inf.cl.length      = 0;
-                    inf.cl.repetitions = 11 + value;
+                    inf.reader.huffmanLength = 0;
+                    inf.reader.repetitions   = 11 + value;
                     break;
                 default:
                     /* codeLengths.markAsError(); */
                     return Inf_TRUE;
             }
-            while (inf.cl.code<numberOfCodes && inf.cl.repetitions>0) {
-                InfSL_Add(infptr, inf.cl.code, inf.cl.length);
-                ++inf.cl.code; --inf.cl.repetitions;
+            while (inf.reader.symbol<numberOfSymbols && inf.reader.repetitions>0) {
+                InfSL_Add(infptr, inf.reader.symbol, inf.reader.huffmanLength);
+                ++inf.reader.symbol; --inf.reader.repetitions;
             }
         }
         /* mark current command as finished */
-        inf.cl.command = Command_ReadNext;
+        inf.reader.command = InfCmd_ReadNext;
     }
     return Inf_TRUE;
 }
@@ -390,7 +393,6 @@ static const InfSymlen* InfSL_Close(Inflater* infptr) {
         inf.symlenList.tailPtr[lastValidLength]->next = currentHead;
         lastValidLength = currentLength;
     } while ( currentLength<Inf_LastValidLength );
-    inf.symlenList.index = 0;
     return firstElement;
 }
 
@@ -683,7 +685,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Load_FrontHuffmanTable2);
                 
             case InfStep_Load_FrontHuffmanTable2:
-                if ( !InfSL_ReadCodes(infptr,inf._hclen+4) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !InfSL_ReadSymlenSequence(infptr,inf._hclen+4) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.frontDecoder = InfHuff_MakeTable(inf.huffmanTable1, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
@@ -695,7 +697,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable2);
                 
             case InfStep_Load_LiteralHuffmanTable2:
-                if ( !InfSL_ReadCompressedCodes(infptr,inf._hlit+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !InfSL_ReadCompressedSymlens(infptr,inf._hlit+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.literalDecoder = InfHuff_MakeTable(inf.huffmanTable0, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
@@ -707,7 +709,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable2);
                 
             case InfStep_Load_DistanceHuffmanTable2:
-                if ( !InfSL_ReadCompressedCodes(infptr,inf._hdist+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !InfSL_ReadCompressedSymlens(infptr,inf._hdist+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.distanceDecoder = InfHuff_MakeTable(inf.huffmanTable1, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Process_CompressedBlock);
                 

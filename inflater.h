@@ -153,19 +153,18 @@ typedef struct Inflater {
     
     /* HIDDEN: symbol-length reader */
     struct {
-        InfSymlen* tailPtr[Inf_LastValidLength+1];
-        InfSymlen* headPtr[Inf_LastValidLength+1];
-        InfSymlen  elements[Inf_LastValidSymbol+1];
-        int        index;
+        InfSymlen*    tailPtr[Inf_LastValidLength+1];
+        InfSymlen*    headPtr[Inf_LastValidLength+1];
+        InfSymlen     elements[Inf_LastValidSymbol+1]; /**< Elements to add to the list */
+        int           elementIndex;        /**< Index to the next free element that is ready to add to the list */
     } symlenList;
     struct {
-        unsigned    command;
-        unsigned    code;
-        unsigned    length;
-        unsigned    repetitions;
-        unsigned char lengths[19];
-        
-    } cl;
+        unsigned      command;             /**< current command, ex: Command_CopyPreviousLength       */
+        unsigned      symbol;              /**< current symbol value                                  */
+        unsigned      huffmanLength;       /**< last huffman-length read                              */
+        unsigned      repetitions;         /**< number of repetitions of the last huffman-length read */
+        unsigned char lengthsBySymbol[19]; /**< Array used to sort lengths by symbol number           */
+    } reader;
 
 
     const union InfHuff* frontDecoder;        /**< The base decoder used to decode the next 2 decoders (it's crazy!) */
