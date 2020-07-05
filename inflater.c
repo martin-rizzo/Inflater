@@ -257,7 +257,7 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 /** Starts the creation of a symbol-length list (inf.symlenList) */
 static void InfSL_Open(Inflater* infptr, InfBool resetRepetitions) {
     int length;
-    if (resetRepetitions) { inf.reader.command = inf.reader.huffmanLength = inf.reader.repetitions=0; }
+    if (resetRepetitions) { inf.reader.command = inf.reader.huffmanLength = inf.reader.repetitions = 0; }
     inf.symlenList.elementIndex = inf.reader.symbol = 0;
     for (length=0; length<=Inf_LastValidLength; ++length) {
         inf.symlenList.headPtr[length] = inf.symlenList.tailPtr[length] = NULL;
@@ -313,66 +313,56 @@ static InfBool InfSL_ReadSymlenSequence(Inflater* infptr, unsigned numberOfSymbo
 }
 
 /** Adds a sequence of symbol-length pairs reading and decimpressing data from the bitstream */
-static InfBool InfSL_ReadCompressedSymlens(Inflater* infptr, unsigned numberOfSymbols, const InfHuff* table) {
+static InfBool InfSL_ReadCompressedSymlens(Inflater* infptr, unsigned numberOfSymbols, const InfHuff* decoder) {
     enum InfCmd {
         InfCmd_ReadNext            = 0,  /**< load next command                             */
-        InfCmd_UseCmdAsLength      = 15, /**< length is the value stored in 'infcl.command' */
         InfCmd_CopyPreviousLength  = 16, /**< repeat the previous length                    */
         InfCmd_RepeatZeroLength_3  = 17, /**< repeat zero length (3 or more times)          */
         InfCmd_RepeatZeroLength_11 = 18  /**< repeat zero length (11 or more times)         */
     };
-    unsigned value = 0;
-    assert( infptr!=NULL && numberOfSymbols>0 && table!=NULL );
+    unsigned value;
+    assert( infptr!=NULL && numberOfSymbols>0 && decoder!=NULL );
 
-    /* IMPORTANT: add any repetition that is pending from a previous load (ex: literals-table > distance-table) */
-    while (inf.reader.symbol<numberOfSymbols && inf.reader.repetitions>0) {
+    /* IMPORTANT: add any repetition that is pending from a previous load (ex: literals-decoder > distance-decoder) */
+    while (inf.reader.repetitions>0 && inf.reader.symbol<numberOfSymbols) {
         InfSL_Add(infptr, inf.reader.symbol, inf.reader.huffmanLength);
         ++inf.reader.symbol; --inf.reader.repetitions;
     }
-    
     /* add (one by one) all symbols with their corresponding huffmanLengths taking into account the number of repetitions */
-    while ( inf.reader.symbol<numberOfSymbols ) {
-        assert( inf.reader.repetitions==0 );
-        
+    while ( inf.reader.symbol<numberOfSymbols )
+    {
         /* read a new command */
         if ( inf.reader.command == InfCmd_ReadNext ) {
-            if ( !InfBS_ReadCompressedBits(infptr, &inf.reader.command, table) ) { return Inf_FALSE; }
-        }
-        /* process simple command */
-        if ( inf.reader.command <= InfCmd_UseCmdAsLength ) {
-            inf.reader.huffmanLength = inf.reader.command;
-            InfSL_Add(infptr, inf.reader.symbol, inf.reader.huffmanLength);
-            ++inf.reader.symbol;
+            if ( !InfBS_ReadCompressedBits(infptr, &inf.reader.command, decoder) ) { return Inf_FALSE; }
         }
         /* process command with repetition */
-        else {
-            switch (inf.reader.command) {
-                case InfCmd_CopyPreviousLength:
-                    if (inf.reader.symbol==0) { /* codeLengths.markAsError(); */ return Inf_TRUE; }
-                    if ( !InfBS_ReadBits(infptr,&value,2) ) { return Inf_FALSE; }
-                    inf.reader.repetitions = 3 + value;
-                    break;
-                case InfCmd_RepeatZeroLength_3:
-                    if ( !InfBS_ReadBits(infptr,&value,3) ) { return Inf_FALSE; }
-                    inf.reader.huffmanLength = 0;
-                    inf.reader.repetitions   = 3 + value;
-                    break;
-                case InfCmd_RepeatZeroLength_11:
-                    if ( !InfBS_ReadBits(infptr,&value,7) ) { return Inf_FALSE; }
-                    inf.reader.huffmanLength = 0;
-                    inf.reader.repetitions   = 11 + value;
-                    break;
-                default:
-                    /* codeLengths.markAsError(); */
-                    return Inf_TRUE;
-            }
-            while (inf.reader.symbol<numberOfSymbols && inf.reader.repetitions>0) {
-                InfSL_Add(infptr, inf.reader.symbol, inf.reader.huffmanLength);
-                ++inf.reader.symbol; --inf.reader.repetitions;
-            }
+        switch (inf.reader.command) {
+            case InfCmd_CopyPreviousLength:
+                if ( !InfBS_ReadBits(infptr,&value,2) ) { return Inf_FALSE; }
+                inf.reader.repetitions   = 3 + value;
+                break;
+            case InfCmd_RepeatZeroLength_3:
+                if ( !InfBS_ReadBits(infptr,&value,3) ) { return Inf_FALSE; }
+                inf.reader.repetitions   = 3 + value;
+                inf.reader.huffmanLength = 0;
+                break;
+            case InfCmd_RepeatZeroLength_11:
+                if ( !InfBS_ReadBits(infptr,&value,7) ) { return Inf_FALSE; }
+                inf.reader.repetitions   = 11 + value;
+                inf.reader.huffmanLength = 0;
+                break;
+            default: /* length is the value stored in 'inf.reader.command' */
+                inf.reader.repetitions   = 1;
+                inf.reader.huffmanLength = inf.reader.command;
+                break;
+        }
+        while (inf.reader.repetitions>0 && inf.reader.symbol<numberOfSymbols) {
+            InfSL_Add(infptr, inf.reader.symbol, inf.reader.huffmanLength);
+            ++inf.reader.symbol; --inf.reader.repetitions;
         }
         /* mark current command as finished */
         inf.reader.command = InfCmd_ReadNext;
+        assert( inf.reader.repetitions==0 );
     }
     return Inf_TRUE;
 }
