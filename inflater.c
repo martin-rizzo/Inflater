@@ -5,7 +5,7 @@
  * @copyright  Copyright (c) 2020 Martin Rizzo.
  *             This project is released under the MIT License.
  * -------------------------------------------------------------------------
- *  Inflater - One-header library to decode data compressed with the Deflate algorithm.
+ *  Inflater - One-header library to decode data compressed with the DEFLATE algorithm.
  * -------------------------------------------------------------------------
  *  Copyright (c) 2020 Martin Rizzo
  *
@@ -33,8 +33,6 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
-/* #include "PDZip_ReversedHuffmanDecoder.h" */
-
 #include <stdio.h>
 
 
@@ -89,8 +87,8 @@ static const unsigned char Inf_Reverse[256] = {
 /** Loads the next byte (8 bits) from the input stream to the bitbuffer */
 static InfBool InfBS_LoadNextByte(Inflater* infptr) {
     if (inf.inputChunkPtr==inf.inputChunkEnd) { return Inf_FALSE; }
-    inf.bitbuffer  |= (*inf.inputChunkPtr++ << inf.bitcounter);
-    inf.bitcounter += 8;
+    inf.bitbuf.bits |= (*inf.inputChunkPtr++ << inf.bitbuf.size);
+    inf.bitbuf.size += 8;
     return Inf_TRUE;
 }
 
@@ -98,12 +96,12 @@ static InfBool InfBS_LoadNextByte(Inflater* infptr) {
 static InfBool InfBS_ReadBits(Inflater* infptr, unsigned* dest, int numberOfBitsToRead) {
     assert( infptr!=NULL && dest!=NULL && numberOfBitsToRead>=0 );
     
-    while (inf.bitcounter<numberOfBitsToRead) {
+    while (inf.bitbuf.size<numberOfBitsToRead) {
         if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
     }
-    (*dest) = inf.bitbuffer & ((1<<numberOfBitsToRead)-1);
-    inf.bitbuffer  >>= numberOfBitsToRead;
-    inf.bitcounter  -= numberOfBitsToRead;
+    (*dest) = inf.bitbuf.bits & ((1<<numberOfBitsToRead)-1);
+    inf.bitbuf.bits >>= numberOfBitsToRead;
+    inf.bitbuf.size  -= numberOfBitsToRead;
     return Inf_TRUE;
 }
 
@@ -112,38 +110,38 @@ static InfBool InfBS_ReadCompressedBits(Inflater* infptr, unsigned* dest, const 
     unsigned numberOfBitsToAdvance; InfHuff data, tmp;
     assert( infptr!=NULL && dest!=NULL && table!=NULL );
 
-    if (inf.bitcounter==0 && !InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
-    data=InfHuff_Decode(table, tmp, inf.bitbuffer); numberOfBitsToAdvance=data.value.length;
+    if (inf.bitbuf.size==0 && !InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
+    data=InfHuff_Decode(table, tmp, inf.bitbuf.bits); numberOfBitsToAdvance=data.value.length;
     
-    while (inf.bitcounter<numberOfBitsToAdvance) {
+    while (inf.bitbuf.size<numberOfBitsToAdvance) {
         if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; }
-        data=InfHuff_Decode(table, tmp, inf.bitbuffer); numberOfBitsToAdvance=data.value.length;
+        data=InfHuff_Decode(table, tmp, inf.bitbuf.bits); numberOfBitsToAdvance=data.value.length;
     }
     (*dest) = data.value.code;
-    inf.bitbuffer >>= numberOfBitsToAdvance;
-    inf.bitcounter -= numberOfBitsToAdvance;
+    inf.bitbuf.bits >>= numberOfBitsToAdvance;
+    inf.bitbuf.size  -= numberOfBitsToAdvance;
     return Inf_TRUE;
 }
 
 /** Read a DWORD (32 bits) from the bitbuffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
 static InfBool InfBS_ReadDWord(Inflater* infptr, unsigned* dest) {
     static const unsigned numberOfBitsToRead = 32; /**< number of bits in a DWord */
-    const unsigned        bitsToSkip         = (inf.bitcounter%8);
+    const unsigned        bitsToSkip         = (inf.bitbuf.size%8);
     assert( dest!=NULL && 8*sizeof(*dest)>=numberOfBitsToRead );
     /* skip any padding bits because bitbuffer must be byte aligned before reading a Word */
-    inf.bitbuffer  >>= bitsToSkip;
-    inf.bitcounter  -= bitsToSkip;
-    while ( inf.bitcounter <numberOfBitsToRead ) { if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; } }
-    assert( inf.bitcounter==numberOfBitsToRead );
-    (*dest) = inf.bitbuffer;
-    inf.bitbuffer  = inf.bitcounter = 0;
+    inf.bitbuf.bits >>= bitsToSkip;
+    inf.bitbuf.size  -= bitsToSkip;
+    while ( inf.bitbuf.size<numberOfBitsToRead ) { if (!InfBS_LoadNextByte(infptr)) { return Inf_FALSE; } }
+    assert( inf.bitbuf.size==numberOfBitsToRead );
+    (*dest) = inf.bitbuf.bits;
+    inf.bitbuf.bits = inf.bitbuf.size = 0;
     return Inf_TRUE;
 }
 
 /** Reads a sequence of bytes directly from the input stream (bitbuffer must be empty) */
 static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* inout_numberOfBytes) {
     size_t numberOfRequestedBytes, successfulBytes;
-    assert( infptr!=NULL && dest!=NULL && inout_numberOfBytes!=NULL && inf.bitcounter==0 );
+    assert( infptr!=NULL && dest!=NULL && inout_numberOfBytes!=NULL && inf.bitbuf.size==0 );
     numberOfRequestedBytes = (*inout_numberOfBytes);
     successfulBytes        = min( numberOfRequestedBytes, (inf.inputChunkEnd-inf.inputChunkPtr) );
     memcpy(dest, inf.inputChunkPtr, successfulBytes);
@@ -502,9 +500,9 @@ Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
     inf.providedData.bufferSize = 0;
     
     /*---- decompress ---------------------------- */
-    inf.step       = 0;
-    inf.bitbuffer  = 0;
-    inf.bitcounter = 0;
+    inf.step        = 0;
+    inf.bitbuf.bits = 0;
+    inf.bitbuf.size = 0;
     
     
     if (workingBuffer!=NULL && workingBufferSize>=InfHelperBufferSize) {
@@ -628,18 +626,18 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              */
             case InfStep_Process_UncompressedBlock:
                 if ( !InfBS_ReadDWord(infptr,&temp) ) { inf__FILL_INPUT_BUFFER(); }
-                inf._seq_len = (temp & 0xFFFF);
-                if ( inf._seq_len != ((~temp)>>16) ) { inf__ERROR(InfError_BadBlockLength); }
+                inf.sequence_len = (temp & 0xFFFF);
+                if ( inf.sequence_len != ((~temp)>>16) ) { inf__ERROR(InfError_BadBlockLength); }
                 inf__fallthrough(InfStep_Output_UncompressedBlock);
                 
             case InfStep_Output_UncompressedBlock:
-                numberOfBytes = min( inf._seq_len, (writeEnd-writePtr) );
+                numberOfBytes = min( inf.sequence_len, (writeEnd-writePtr) );
                 canReadAll    = InfBS_ReadBytes(infptr, writePtr, &numberOfBytes);
-                inf._seq_len -= numberOfBytes;
-                writePtr     += numberOfBytes;
-                if      ( !canReadAll    ) { inf__FILL_INPUT_BUFFER();         }
-                else if ( inf._seq_len>0 ) { inf__USE_OUTPUT_BUFFER_CONTENT(); }
-                assert( inf._seq_len==0 );
+                inf.sequence_len -= numberOfBytes;
+                writePtr         += numberOfBytes;
+                if      ( !canReadAll        ) { inf__FILL_INPUT_BUFFER();         }
+                else if ( inf.sequence_len>0 ) { inf__USE_OUTPUT_BUFFER_CONTENT(); }
+                assert( inf.sequence_len==0 );
                 inf__goto(InfStep_ProcessNextBlock);
 
             /*-------------------------------------------------------------------------------------
@@ -669,7 +667,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_FrontHuffmanTable2:
                 if ( !InfSL_ReadSymlenSequence(infptr,inf._hclen+4) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.frontDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTable1, InfSL_Close(infptr));
+                inf.frontDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
             /*----------------------------------
@@ -681,7 +679,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_LiteralHuffmanTable2:
                 if ( !InfSL_ReadCompressedSymlens(infptr,inf._hlit+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.literalDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTable0, InfSL_Close(infptr));
+                inf.literalDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table0, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
             /*----------------------------------
@@ -693,7 +691,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 
             case InfStep_Load_DistanceHuffmanTable2:
                 if ( !InfSL_ReadCompressedSymlens(infptr,inf._hdist+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.distanceDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTable1, InfSL_Close(infptr));
+                inf.distanceDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Process_CompressedBlock);
                 
             /*-------------------------------------------------------------------------------------
@@ -701,38 +699,38 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              */
             case InfStep_Process_CompressedBlock:
             case InfStep_Read_LiteralOrLength:
-                if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf.literalDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !InfBS_ReadCompressedBits(infptr,&inf.literal,inf.literalDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 inf__fallthrough(InfStep_Read_LiteralOrLength2);
                 
             case InfStep_Read_LiteralOrLength2:
-                if (inf._literal <Inf_EndOfBlock) {
+                if (inf.literal <Inf_EndOfBlock) {
                     if (writePtr==writeEnd) { inf__USE_OUTPUT_BUFFER_CONTENT(); }
-                    *writePtr++ = inf._literal;
+                    *writePtr++ = inf.literal;
                     inf__goto(InfStep_Read_LiteralOrLength);
                 }
-                else if (inf._literal==Inf_EndOfBlock) {
+                else if (inf.literal==Inf_EndOfBlock) {
                     printf(" > EndOfBlock\n");
                     inf__goto(InfStep_ProcessNextBlock);
                 }
-                else if (inf._literal>Inf_MaxValidLengthCode) { inf__ERROR(InfError_BadBlockContent); }
-                inf._literal -= 257;
+                else if (inf.literal>Inf_MaxValidLengthCode) { inf__ERROR(InfError_BadBlockContent); }
+                inf.literal -= 257;
                 inf__fallthrough(InfStep_Read_LengthBits);
                 
             case InfStep_Read_LengthBits:
-                if ( !InfBS_ReadBits(infptr, &temp, lengthExtraBits[inf._literal]) ) { inf__FILL_INPUT_BUFFER(); }
-                inf._seq_len   =   temp + lengthStarts[inf._literal];
-                assert( inf._seq_len<(32*1024) );
+                if ( !InfBS_ReadBits(infptr, &temp, lengthExtraBits[inf.literal]) ) { inf__FILL_INPUT_BUFFER(); }
+                inf.sequence_len = temp + lengthStarts[inf.literal];
+                assert( inf.sequence_len<(32*1024) );
                 inf__fallthrough(InfStep_Read_Distance);
                 
             case InfStep_Read_Distance:
-                if ( !InfBS_ReadCompressedBits(infptr,&inf._literal,inf.distanceDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                if (inf._literal>Inf_MaxValidDistanceCode) { inf__ERROR(InfError_BadBlockContent); }
+                if ( !InfBS_ReadCompressedBits(infptr,&inf.literal,inf.distanceDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if (inf.literal>Inf_MaxValidDistanceCode) { inf__ERROR(InfError_BadBlockContent); }
                 inf__fallthrough(InfStep_Read_DistanceBits);
                 
             case InfStep_Read_DistanceBits:
-                if ( !InfBS_ReadBits(infptr, &temp, distanceExtraBits[inf._literal]) ) { inf__FILL_INPUT_BUFFER(); }
-                inf._seq_dist =  temp + distanceStarts[inf._literal];
-                assert( inf._seq_dist<(32*1024) );
+                if ( !InfBS_ReadBits(infptr, &temp, distanceExtraBits[inf.literal]) ) { inf__FILL_INPUT_BUFFER(); }
+                inf.sequence_dist =  temp + distanceStarts[inf.literal];
+                assert( inf.sequence_dist<(32*1024) );
                 inf__fallthrough(InfStep_Output_RepeatedSequence);
 
             /*-------------------------------------------------------------------------------------
@@ -743,23 +741,23 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              * <... ghost > # [[ straight * overlapped  ...... ghost ]] #
              */
             case InfStep_Output_RepeatedSequence:
-                sequencePtr = writePtr - inf._seq_dist;
+                sequencePtr = writePtr - inf.sequence_dist;
                 if (sequencePtr<(Byte*)outputBuffer) {
                     sequencePtr += outputBufferSize;
                     /*-- copy bytes ---*/
-                    inf._seq_len -= numberOfBytes = min( inf._seq_len, (writeEnd-sequencePtr) );
+                    inf.sequence_len -= numberOfBytes = min( inf.sequence_len, (writeEnd-sequencePtr) );
                     memmove( writePtr, sequencePtr, numberOfBytes ); writePtr+=numberOfBytes;
                     /*-----------------*/
-                    if ( inf._seq_len==0    ) { inf__goto(InfStep_Read_LiteralOrLength); }
-                    if ( writePtr==writeEnd ) { inf__USE_OUTPUT_BUFFER_CONTENT();        }
+                    if ( inf.sequence_len==0 ) { inf__goto(InfStep_Read_LiteralOrLength); }
+                    if ( writePtr==writeEnd  ) { inf__USE_OUTPUT_BUFFER_CONTENT();        }
                     sequencePtr = outputBuffer;
                 }
                 /*-- copy bytes ---*/
-                inf._seq_len -= numberOfBytes = min( inf._seq_len, (writeEnd-writePtr) );
+                inf.sequence_len -= numberOfBytes = min( inf.sequence_len, (writeEnd-writePtr) );
                 while ( numberOfBytes-->0 ) { *writePtr++ = *sequencePtr++; }
                 /*-----------------*/
-                if ( inf._seq_len==0    ) { inf__goto(InfStep_Read_LiteralOrLength); }
-                if ( writePtr==writeEnd ) { inf__USE_OUTPUT_BUFFER_CONTENT();        }
+                if ( inf.sequence_len==0 ) { inf__goto(InfStep_Read_LiteralOrLength); }
+                if ( writePtr==writeEnd  ) { inf__USE_OUTPUT_BUFFER_CONTENT();        }
                 inf__ERROR(InfError_BadBlockContent);
                 
             case InfStep_FatalError:

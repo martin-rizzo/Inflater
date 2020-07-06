@@ -135,43 +135,53 @@ typedef struct Inflater {
     InfData     providedData;
     
     
-    /* HIDDEN: decompress */
+    /* HIDDEN: data used directly by the DEFLATE algorithm */
     unsigned step;
     
     unsigned _lastBlock;
     unsigned _blocktype;
-    unsigned bitbuffer;  /**< bit-stream buffer                       */
-    unsigned bitcounter; /**< number of bits contained in 'bitbuffer' */
     
     unsigned _hlit;
     unsigned _hdist;
     unsigned _hclen;
     
-    unsigned _literal;
-    unsigned _seq_dist;
-    unsigned _seq_len;
+    unsigned             literal;         /**< literal value to output             */
+    unsigned             sequence_dist;   /**< distance of the sequence to output  */
+    unsigned             sequence_len;    /**< length of the sequence to output    */
+    const union InfHuff* frontDecoder;    /**< The huffman decoder used to decode the next 2 huffman decoders (it's crazy!) */
+    const union InfHuff* literalDecoder;  /**< The literal+length huffman decoder  */
+    const union InfHuff* distanceDecoder; /**< The distance huffman decoder        */
+
     
-    /* HIDDEN: symbol-length reader */
+    /* HIDDEN: bitbuffer */
     struct {
-        InfSymlen*    tailPtr[Inf_LastValidLength+1];
-        InfSymlen*    headPtr[Inf_LastValidLength+1];
-        InfSymlen     elements[Inf_LastValidSymbol+1]; /**< Elements to add to the list */
-        int           elementIndex;        /**< Index to the next free element that is ready to add to the list */
+        unsigned bits;  /**< the bitbuffer bits              */
+        unsigned size;  /**< number of bits in `bitbuf.bits` */
+    } bitbuf;
+    
+    /* HIDDEN: symbol-length list used to create the huffman tables */
+    struct {
+        /* the final list is sorted by the `length` value, the resulting of concatenating all these partial lists */
+        InfSymlen* headPtr[Inf_LastValidLength+1];  /**< heads pointers, one by list (each list represents a length) */
+        InfSymlen* tailPtr[Inf_LastValidLength+1];  /**< tails pointers, one by list (each list represents a length) */
+        InfSymlen  elements[Inf_LastValidSymbol+1]; /**< Free elements to be added to the list */
+        int        elementIndex;                    /**< Index to the next free element that is ready to be added */
     } symlenList;
+    
+    /* HIDDEN: symbol-length list reader */
     struct {
-        unsigned      command;             /**< current command, ex: Command_CopyPreviousLength       */
+        unsigned      command;             /**< current command, ex: InfCmd_CopyPreviousLength        */
         unsigned      symbol;              /**< current symbol value                                  */
         unsigned      huffmanLength;       /**< last huffman-length read                              */
         unsigned      repetitions;         /**< number of repetitions of the last huffman-length read */
         unsigned char lengthsBySymbol[19]; /**< Array used to sort lengths by symbol number           */
     } reader;
 
-
-    const union InfHuff* frontDecoder;        /**< The base decoder used to decode the next 2 decoders (it's crazy!) */
-    const union InfHuff* literalDecoder;      /**< The literal+length huffman decoder  */
-    const union InfHuff* distanceDecoder;     /**< The distance huffman decoder        */
-    InfHuff huffmanTable0[Inf_HuffTableSize];
-    InfHuff huffmanTable1[Inf_HuffTableSize];
+    /* HIDDEN: buffers to store the huffman tables used by decoders (frontDecoder, literalDecoder & distanceDecoder) */
+    struct {
+        InfHuff              table0[Inf_HuffTableSize];
+        InfHuff              table1[Inf_HuffTableSize];
+    } huff;
 
 } Inflater;
 
