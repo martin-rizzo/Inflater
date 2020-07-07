@@ -154,6 +154,12 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 /*====================================================================================================================*/
 #pragma mark  -  READING THE SYMBOL/LENGTH LIST
 
+/** Adds a range of symbol-length pairs to the list (inf.symlenList) */
+#define InfSL_AddRange(infptr, tmp, firstSymbol, lastSymbol, huffmanLength) \
+    for (tmp=firstSymbol; tmp<lastSymbol; ++tmp) {  \
+        InfSL_Add(infptr, tmp, huffmanLength);  \
+    }
+
 /** Adds a symbol-length pair to the list (inf.symlenList) */
 static void InfSL_Add(Inflater* infptr, unsigned symbol, unsigned huffmanLength) {
     assert( 0<=symbol        &&        symbol<=Inf_LastValidSymbol );
@@ -166,18 +172,6 @@ static void InfSL_Add(Inflater* infptr, unsigned symbol, unsigned huffmanLength)
         newSymlen->huffmanLength = huffmanLength;
         newSymlen->next          = NULL;
         inf.symlenList.tailPtr[huffmanLength] = newSymlen;
-    }
-}
-
-/** Adds a range of symbol-length pairs to the list (inf.symlenList) */
-static void InfSL_AddRange(Inflater* infptr, unsigned firstSymbol, unsigned lastSymbol, unsigned huffmanLength) {
-    int symbol;
-    assert( infptr!=NULL );
-    assert( 0<=firstSymbol && firstSymbol<=(Inf_LastValidSymbol)   );
-    assert( 0<=lastSymbol  &&  lastSymbol<=(Inf_LastValidSymbol+1) );
-    assert( firstSymbol<=lastSymbol );
-    for (symbol=firstSymbol; symbol<lastSymbol; ++symbol) {
-        InfSL_Add(infptr, symbol, huffmanLength);
     }
 }
 
@@ -382,25 +376,23 @@ static const InfHuff* InfHuff_MakeDynamicDecoder(InfHuff* table, const InfSymlen
 }
 
 static InfHuff* InfHuff_GetFixedLiteralDecoder(Inflater* infptr) {
-    static InfHuff table[Inf_HuffTableSize];
-    static InfBool loaded = Inf_FALSE;
+    static InfHuff table[Inf_HuffTableSize]; static InfBool loaded = Inf_FALSE; unsigned tmp;
     if (!loaded) {
         loaded = Inf_TRUE;
-        InfSL_AddRange(infptr,   0,144, 8);
-        InfSL_AddRange(infptr, 144,256, 9);
-        InfSL_AddRange(infptr, 256,280, 7);
-        InfSL_AddRange(infptr, 280,288, 8);
+        InfSL_AddRange(infptr,tmp,   0,144, 8);
+        InfSL_AddRange(infptr,tmp, 144,256, 9);
+        InfSL_AddRange(infptr,tmp, 256,280, 7);
+        InfSL_AddRange(infptr,tmp, 280,288, 8);
         InfHuff_MakeDynamicDecoder(table, InfSL_MakeSortedList(infptr, Inf_TRUE) );
     }
     return table;
 }
 
 static InfHuff* InfHuff_GetFixedDistanceDecoder(Inflater* infptr) {
-    static InfHuff table[Inf_HuffTableSize];
-    static InfBool loaded = Inf_FALSE;
+    static InfHuff table[Inf_HuffTableSize]; static InfBool loaded = Inf_FALSE; unsigned tmp;
     if (!loaded) {
         loaded = Inf_TRUE;
-        InfSL_AddRange(infptr, 0,32, 5);
+        InfSL_AddRange(infptr,tmp,  0,32, 5);
         InfHuff_MakeDynamicDecoder(table, InfSL_MakeSortedList(infptr, Inf_TRUE) );
     }
     return table;
