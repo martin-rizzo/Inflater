@@ -136,16 +136,18 @@ typedef struct Inflater {
     
     
     /* HIDDEN: data used directly by the inflate process */
-    unsigned             step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
-    unsigned             isLastBlock;     /**< TRUE (1) when processing the last block of the data set              */
-    unsigned             symcount;        /**< The number of symbols used in front,literal & distance decoders      */
-    unsigned             literal;         /**< literal value to output             */
-    unsigned             sequence_dist;   /**< distance of the sequence to output  */
-    unsigned             sequence_len;    /**< length of the sequence to output    */
-    const union InfHuff* frontDecoder;    /**< The huffman decoder used to decode the next 2 huffman decoders (it's crazy!) */
-    const union InfHuff* literalDecoder;  /**< The literal+length huffman decoder  */
-    const union InfHuff* distanceDecoder; /**< The distance huffman decoder        */
-    
+    unsigned       step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
+    unsigned       isLastBlock;     /**< TRUE (1) when processing the last block of the data set              */
+    unsigned       symcount;        /**< The number of symbols used in front,literal & distance decoders      */
+    unsigned       literal;         /**< literal value to output                                              */
+    unsigned       sequence_dist;   /**< distance of the sequence to output                                   */
+    unsigned       sequence_len;    /**< length of the sequence to output                                     */
+    const InfHuff* frontDecoder;    /**< The huffman decoder used to decode the next 2 huffman decoders (it's crazy!) */
+    const InfHuff* literalDecoder;  /**< The literal+length huffman decoder                                   */
+    const InfHuff* distanceDecoder; /**< The distance huffman decoder                                         */
+    InfHuff        huffmanTableA[Inf_HuffTableSize]; /**< pri. buffer where huffman tables used by decoders are stored */
+    InfHuff        huffmanTableB[Inf_HuffTableSize]; /**< sec. buffer where huffman tables used by decoders are stored */
+
     /* HIDDEN: bitbuffer */
     struct {
         unsigned bits;  /**< the bitbuffer bits              */
@@ -169,12 +171,6 @@ typedef struct Inflater {
         unsigned      repetitions;         /**< number of repetitions of the last huffman-length read */
         unsigned char lengthsBySymbol[19]; /**< Array used to sort lengths by symbol number           */
     } reader;
-
-    /* HIDDEN: buffers to store the huffman tables used by decoders (frontDecoder, literalDecoder & distanceDecoder) */
-    struct {
-        InfHuff              table0[Inf_HuffTableSize];
-        InfHuff              table1[Inf_HuffTableSize];
-    } huff;
 
 } Inflater;
 

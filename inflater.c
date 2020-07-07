@@ -252,7 +252,7 @@ static InfBool InfSL_ReadCompressedSymlens(Inflater* infptr, unsigned numberOfSy
 }
 
 /** Finishes the creation of a symbol-length list (inf.symlenList) */
-static const InfSymlen* InfSL_MakeSortedList(Inflater* infptr, InfBool resetRepetitions) {
+static const InfSymlen* InfSL_GetSortedList(Inflater* infptr, InfBool resetRepetitions) {
     int lastValidLength = 0;
     int currentLength   = 0;
     InfSymlen *firstElement, *currentHead;
@@ -383,7 +383,7 @@ static InfHuff* InfHuff_GetFixedLiteralDecoder(Inflater* infptr) {
         InfSL_AddRange(infptr,tmp, 144,256, 9);
         InfSL_AddRange(infptr,tmp, 256,280, 7);
         InfSL_AddRange(infptr,tmp, 280,288, 8);
-        InfHuff_MakeDynamicDecoder(table, InfSL_MakeSortedList(infptr, Inf_TRUE) );
+        InfHuff_MakeDynamicDecoder(table, InfSL_GetSortedList(infptr, Inf_TRUE) );
     }
     return table;
 }
@@ -393,7 +393,7 @@ static InfHuff* InfHuff_GetFixedDistanceDecoder(Inflater* infptr) {
     if (!loaded) {
         loaded = Inf_TRUE;
         InfSL_AddRange(infptr,tmp,  0,32, 5);
-        InfHuff_MakeDynamicDecoder(table, InfSL_MakeSortedList(infptr, Inf_TRUE) );
+        InfHuff_MakeDynamicDecoder(table, InfSL_GetSortedList(infptr, Inf_TRUE) );
     }
     return table;
 }
@@ -648,17 +648,17 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
 
             case InfStep_Load_FrontHuffmanTable:
                 if ( !InfSL_ReadSymlenSequence(infptr,((inf.symcount>>10)&0x0F)+4) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.frontDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_MakeSortedList(infptr,Inf_TRUE));
+                inf.frontDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTableA, InfSL_GetSortedList(infptr,Inf_TRUE));
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
             case InfStep_Load_LiteralHuffmanTable:
                 if ( !InfSL_ReadCompressedSymlens(infptr,(inf.symcount&0x1F)+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.literalDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table0, InfSL_MakeSortedList(infptr,Inf_FALSE));
+                inf.literalDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTableB, InfSL_GetSortedList(infptr,Inf_FALSE));
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
             case InfStep_Load_DistanceHuffmanTable:
                 if ( !InfSL_ReadCompressedSymlens(infptr,((inf.symcount>>5)&0x1F)+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.distanceDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_MakeSortedList(infptr,Inf_TRUE));
+                inf.distanceDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTableA, InfSL_GetSortedList(infptr,Inf_TRUE));
                 inf__fallthrough(InfStep_Process_CompressedBlock);
                 
             /*-------------------------------------------------------------------------------------
