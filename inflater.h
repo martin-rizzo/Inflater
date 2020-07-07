@@ -135,23 +135,16 @@ typedef struct Inflater {
     InfData     providedData;
     
     
-    /* HIDDEN: data used directly by the DEFLATE algorithm */
-    unsigned step;
-    
-    unsigned _lastBlock;
-    unsigned _blocktype;
-    
-    unsigned _hlit;
-    unsigned _hdist;
-    unsigned _hclen;
-    
+    /* HIDDEN: data used directly by the inflate process */
+    unsigned             step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
+    unsigned             isLastBlock;     /**< TRUE (1) when processing the last block of the data set              */
+    unsigned             symcount;        /**< The number of symbols used in front,literal & distance decoders      */
     unsigned             literal;         /**< literal value to output             */
     unsigned             sequence_dist;   /**< distance of the sequence to output  */
     unsigned             sequence_len;    /**< length of the sequence to output    */
     const union InfHuff* frontDecoder;    /**< The huffman decoder used to decode the next 2 huffman decoders (it's crazy!) */
     const union InfHuff* literalDecoder;  /**< The literal+length huffman decoder  */
     const union InfHuff* distanceDecoder; /**< The distance huffman decoder        */
-
     
     /* HIDDEN: bitbuffer */
     struct {

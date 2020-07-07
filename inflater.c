@@ -585,14 +585,14 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
         switch (step) {
                 
             case InfStep_Start:
-                inf._lastBlock = Inf_FALSE;
+                inf.isLastBlock = 0;
                 inf__fallthrough(InfStep_ProcessNextBlock);
                 
             /*-------------------------------------------------------------------------------------
-             * infstep: READ_BLOCK_HEADER
+             * infstep: PROCESS_NEXT_BLOCK
              */
             case InfStep_ProcessNextBlock:
-                if (inf._lastBlock) {
+                if (inf.isLastBlock) {
                     if (writePtr > inf.outputChunk) {
                         printf(" > END (use remaining output buffer)\n");
                         inf__USE_OUTPUT_BUFFER_CONTENT();
@@ -602,27 +602,22 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 }
                 inf__fallthrough(InfStep_ReadBlockHeader);
                 
+            /*-------------------------------------------------------------------------------------
+             * infstep: READ_BLOCK_HEADER
+             */
             case InfStep_ReadBlockHeader:
                 if ( !InfBS_ReadBits(infptr,&temp,3) ) { inf__FILL_INPUT_BUFFER(); }
-                inf._lastBlock = (temp&0x01)==0x01;
-                inf._blocktype = (temp>>1);
-                if      (inf._blocktype==BlockType_Uncompressed)   {
-                    printf(" > Start Uncompressed Block\n");
-                    inf__goto(InfStep_Process_UncompressedBlock);
+                inf.isLastBlock = (temp&0x01);
+                switch (temp>>1) {
+                    case BlockType_Uncompressed:   inf__goto(InfStep_Process_UncompressedBlock);
+                    case BlockType_FixedHuffman:   inf__goto(InfStep_Load_FixedHuffmanDecoders);
+                    case BlockType_DynamicHuffman: inf__goto(InfStep_Load_DynamicHuffmanDecoders);
+                    default: inf__ERROR(InfError_BadBlockType);
                 }
-                else if (inf._blocktype==BlockType_FixedHuffman)   {
-                    printf(" > Start Fixed Huffman Block\n");
-                    inf__goto(InfStep_Load_FixedHuffmanDecoders);
-                }
-                else if (inf._blocktype==BlockType_DynamicHuffman) {
-                    printf(" > Start Dynamic Huffman Block\n");
-                    inf__goto(InfStep_Load_DynamicHuffmanDecoders);
-                }
-                printf(" > Fatal Error (Bad Block Type)\n");
-                inf__ERROR(InfError_BadBlockType);
+                break;
                 
             /*-------------------------------------------------------------------------------------
-             * Process_UncompressedBlock
+             * infstep: PROCESS_UNCOMPRESSED_BLOCK
              */
             case InfStep_Process_UncompressedBlock:
                 if ( !InfBS_ReadDWord(infptr,&temp) ) { inf__FILL_INPUT_BUFFER(); }
@@ -641,7 +636,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__goto(InfStep_ProcessNextBlock);
 
             /*-------------------------------------------------------------------------------------
-             * Load FixedHuffmanDecoders
+             * infstep: LOAD_FIXED_HUFFMAN_DECODERS
              */
             case InfStep_Load_FixedHuffmanDecoders:
                 inf.literalDecoder  = InfHuff_GetFixedLiteralDecoder(infptr);
@@ -649,13 +644,10 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__goto(InfStep_Process_CompressedBlock);
                 
             /*-------------------------------------------------------------------------------------
-             * Load DynamicHuffmanDecoders
+             * infstep: LOAD_DYNAMIC_HUFFMAN_DECODERS
              */
             case InfStep_Load_DynamicHuffmanDecoders:
-                if ( !InfBS_ReadBits(infptr,&temp,5+5+4) ) { inf__FILL_INPUT_BUFFER(); }
-                inf._hlit  = temp     & 0x1F;
-                inf._hdist = temp>>5  & 0x1F;
-                inf._hclen = temp>>10 & 0x0F;
+                if ( !InfBS_ReadBits(infptr,&inf.symcount,5+5+4) ) { inf__FILL_INPUT_BUFFER(); }
                 inf__fallthrough(InfStep_Load_FrontHuffmanTable);
 
             /*----------------------------------
@@ -666,7 +658,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Load_FrontHuffmanTable2);
                 
             case InfStep_Load_FrontHuffmanTable2:
-                if ( !InfSL_ReadSymlenSequence(infptr,inf._hclen+4) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !InfSL_ReadSymlenSequence(infptr,((inf.symcount>>10)&0x0F)+4) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.frontDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
@@ -678,7 +670,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable2);
                 
             case InfStep_Load_LiteralHuffmanTable2:
-                if ( !InfSL_ReadCompressedSymlens(infptr,inf._hlit+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !InfSL_ReadCompressedSymlens(infptr,(inf.symcount&0x1F)+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.literalDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table0, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
@@ -690,7 +682,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable2);
                 
             case InfStep_Load_DistanceHuffmanTable2:
-                if ( !InfSL_ReadCompressedSymlens(infptr,inf._hdist+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !InfSL_ReadCompressedSymlens(infptr,((inf.symcount>>5)&0x1F)+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.distanceDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_Close(infptr));
                 inf__fallthrough(InfStep_Process_CompressedBlock);
                 
@@ -734,7 +726,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Output_RepeatedSequence);
 
             /*-------------------------------------------------------------------------------------
-             * Output_RepeatedSequence
+             * infstep: OUTPUT_SEQUENCE
              *
              *         outputBegin     writePtr                      writeEnd
              *              V             V                             V
