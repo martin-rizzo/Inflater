@@ -155,13 +155,8 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 #pragma mark  -  READING THE SYMBOL/LENGTH LIST
 
 /** Starts the creation of a symbol-length list (inf.symlenList) */
-static void InfSL_Open(Inflater* infptr, InfBool resetRepetitions) {
-    int length;
-    if (resetRepetitions) { inf.reader.command = inf.reader.huffmanLength = inf.reader.repetitions = 0; }
-    inf.symlenList.elementIndex = inf.reader.symbol = 0;
-    for (length=0; length<=Inf_LastValidLength; ++length) {
-        inf.symlenList.headPtr[length] = inf.symlenList.tailPtr[length] = NULL;
-    }
+static void InfSL_Open(Inflater* infptr) {
+
 }
 
 /** Adds a symbol-length pair to the list (inf.symlenList) */
@@ -174,7 +169,7 @@ static void InfSL_Add(Inflater* infptr, unsigned symbol, unsigned huffmanLength)
         if (last) { last->next = newSymlen; } else { inf.symlenList.headPtr[huffmanLength] = newSymlen; }
         newSymlen->symbol        = symbol;
         newSymlen->huffmanLength = huffmanLength;
-        newSymlen->next   = NULL;
+        newSymlen->next          = NULL;
         inf.symlenList.tailPtr[huffmanLength] = newSymlen;
     }
 }
@@ -215,10 +210,10 @@ static InfBool InfSL_ReadSymlenSequence(Inflater* infptr, unsigned numberOfSymbo
 /** Adds a sequence of symbol-length pairs reading and decimpressing data from the bitstream */
 static InfBool InfSL_ReadCompressedSymlens(Inflater* infptr, unsigned numberOfSymbols, const InfHuff* decoder) {
     enum InfCmd {
-        InfCmd_ReadNext            = 0,  /**< load next command                             */
-        InfCmd_CopyPreviousLength  = 16, /**< repeat the previous length                    */
-        InfCmd_RepeatZeroLength_3  = 17, /**< repeat zero length (3 or more times)          */
-        InfCmd_RepeatZeroLength_11 = 18  /**< repeat zero length (11 or more times)         */
+        InfCmd_ReadNext            = 0,  /**< load next command                     */
+        InfCmd_CopyPreviousLength  = 16, /**< repeat the previous length            */
+        InfCmd_RepeatZeroLength_3  = 17, /**< repeat zero length (3 or more times)  */
+        InfCmd_RepeatZeroLength_11 = 18  /**< repeat zero length (11 or more times) */
     };
     unsigned value;
     assert( infptr!=NULL && numberOfSymbols>0 && decoder!=NULL );
@@ -268,7 +263,7 @@ static InfBool InfSL_ReadCompressedSymlens(Inflater* infptr, unsigned numberOfSy
 }
 
 /** Finishes the creation of a symbol-length list (inf.symlenList) */
-static const InfSymlen* InfSL_Close(Inflater* infptr) {
+static const InfSymlen* InfSL_Close(Inflater* infptr, InfBool resetRepetitions) {
     int lastValidLength = 0;
     int currentLength   = 0;
     InfSymlen *firstElement, *currentHead;
@@ -283,6 +278,14 @@ static const InfSymlen* InfSL_Close(Inflater* infptr) {
         inf.symlenList.tailPtr[lastValidLength]->next = currentHead;
         lastValidLength = currentLength;
     } while ( currentLength<Inf_LastValidLength );
+    
+    /* reset */
+    if (resetRepetitions) { inf.reader.command = inf.reader.huffmanLength = inf.reader.repetitions = 0; }
+    inf.symlenList.elementIndex = inf.reader.symbol = 0;
+    for (currentLength=0; currentLength<=Inf_LastValidLength; ++currentLength) {
+        inf.symlenList.headPtr[currentLength] = inf.symlenList.tailPtr[currentLength] = NULL;
+    }
+    
     return firstElement;
 }
 
@@ -388,12 +391,12 @@ static InfHuff* InfHuff_GetFixedLiteralDecoder(Inflater* infptr) {
     static InfBool loaded = Inf_FALSE;
     if (!loaded) {
         loaded = Inf_TRUE;
-        InfSL_Open(infptr, Inf_TRUE);
+        InfSL_Open(infptr);
         InfSL_AddRange(infptr,   0,144, 8);
         InfSL_AddRange(infptr, 144,256, 9);
         InfSL_AddRange(infptr, 256,280, 7);
         InfSL_AddRange(infptr, 280,288, 8);
-        InfHuff_MakeDynamicDecoder(table, InfSL_Close(infptr) );
+        InfHuff_MakeDynamicDecoder(table, InfSL_Close(infptr, Inf_TRUE) );
     }
     return table;
 }
@@ -403,9 +406,9 @@ static InfHuff* InfHuff_GetFixedDistanceDecoder(Inflater* infptr) {
     static InfBool loaded = Inf_FALSE;
     if (!loaded) {
         loaded = Inf_TRUE;
-        InfSL_Open(infptr, Inf_TRUE);
+        InfSL_Open(infptr);
         InfSL_AddRange(infptr, 0,32, 5);
-        InfHuff_MakeDynamicDecoder(table, InfSL_Close(infptr) );
+        InfHuff_MakeDynamicDecoder(table, InfSL_Close(infptr, Inf_TRUE) );
     }
     return table;
 }
@@ -472,6 +475,7 @@ typedef enum InfStep {
 
 
 Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
+    unsigned length;
     Inflater* infptr = (Inflater*)malloc(sizeof(Inflater));
     
     inf.mode            = InfMode_Uninitialized;
@@ -504,6 +508,16 @@ Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
     inf.bitbuf.bits = 0;
     inf.bitbuf.size = 0;
     
+    /*---- symlen list & reader ------------------ */
+    inf.reader.command          = 0;
+    inf.reader.huffmanLength    = 0;
+    inf.reader.repetitions      = 0;
+    inf.reader.symbol           = 0;
+    inf.symlenList.elementIndex = 0;
+    for (length=0; length<=Inf_LastValidLength; ++length) {
+        inf.symlenList.headPtr[length] = inf.symlenList.tailPtr[length] = NULL;
+    }
+
     
     if (workingBuffer!=NULL && workingBufferSize>=InfHelperBufferSize) {
         inf.helperOutput.buffer     = workingBuffer;
@@ -654,36 +668,36 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              * load "front" huffman table
              */
             case InfStep_Load_FrontHuffmanTable:
-                InfSL_Open(infptr,Inf_TRUE);
+                InfSL_Open(infptr);
                 inf__fallthrough(InfStep_Load_FrontHuffmanTable2);
                 
             case InfStep_Load_FrontHuffmanTable2:
                 if ( !InfSL_ReadSymlenSequence(infptr,((inf.symcount>>10)&0x0F)+4) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.frontDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_Close(infptr));
+                inf.frontDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_Close(infptr,Inf_TRUE));
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable);
                 
             /*----------------------------------
              * load literal-length huffman table
              */
             case InfStep_Load_LiteralHuffmanTable:
-                InfSL_Open(infptr,Inf_TRUE);
+                InfSL_Open(infptr);
                 inf__fallthrough(InfStep_Load_LiteralHuffmanTable2);
                 
             case InfStep_Load_LiteralHuffmanTable2:
                 if ( !InfSL_ReadCompressedSymlens(infptr,(inf.symcount&0x1F)+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.literalDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table0, InfSL_Close(infptr));
+                inf.literalDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table0, InfSL_Close(infptr,Inf_FALSE));
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable);
                 
             /*----------------------------------
              * load distance huffman table
              */
             case InfStep_Load_DistanceHuffmanTable:
-                InfSL_Open(infptr,Inf_FALSE);
+                InfSL_Open(infptr);
                 inf__fallthrough(InfStep_Load_DistanceHuffmanTable2);
                 
             case InfStep_Load_DistanceHuffmanTable2:
                 if ( !InfSL_ReadCompressedSymlens(infptr,((inf.symcount>>5)&0x1F)+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.distanceDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_Close(infptr));
+                inf.distanceDecoder = InfHuff_MakeDynamicDecoder(inf.huff.table1, InfSL_Close(infptr,Inf_TRUE));
                 inf__fallthrough(InfStep_Process_CompressedBlock);
                 
             /*-------------------------------------------------------------------------------------
