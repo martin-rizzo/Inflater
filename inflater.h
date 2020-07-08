@@ -35,21 +35,6 @@
 
 #undef  Byte
 #define Byte  unsigned char
-#define InfMinBufferSize    (32*1024)
-#define InfHelperBufferSize (64*1024)
-
-#define Inf_EndOfBlock           256
-#define Inf_MaxValidLengthCode   285
-#define Inf_MaxValidDistanceCode 29
-#define Inf_LastValidLength      18
-#define Inf_LastValidSymbol      290
-#define Inf_CodeLengthMapSize    ((Inf_LastValidLength+1)+(Inf_LastValidSymbol+1))
-#define Inf_NextIndexMask        0x03FF
-
-
-#define Inf_MainTableSize 256       /**< 8bits                        */
-#define Inf_HuffTableSize  (2*1024) /**< main-table + all sub-tables  */
-
 
 typedef enum InfError {
     InfError_BadBlockContent = -8,     /**< The content of block is invalid */
@@ -71,33 +56,11 @@ typedef enum InfAction {
     InfAction_Init                   = 1024
 } InfAction;
 
-typedef int InfBool; /**< Boolean value */
-#define Inf_FALSE 0
-#define Inf_TRUE  1
-
-
 typedef struct InfData {
     const void* buffer;
     size_t      bufferSize;
 } InfData;
 
-
-typedef struct InfSymlen {
-    unsigned           symbol;        /**< The decompressed value assigned to the huffman code */
-    unsigned           huffmanLength; /**< The huffman code length (in number of bits)         */
-    struct InfSymlen* next;
-} InfSymlen;
-
-
-typedef union InfHuff {
-    struct value    { unsigned length:15, isvalid:1,  code:15; } value;
-    struct subtable { unsigned   mask:15,   error:1, index:15; } subtable;
-    unsigned raw;
-} InfHuff;
-
-#define InfHuff_Set(s, huff, hufflen, byte) s.value.code=byte; s.value.isvalid=1; s.value.length=hufflen
-#define InfHuff_SubTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
-#define InfHuff_Const(code_,length_) { length_, 1, code_ }
 
 struct Inflater;
 typedef void (*InfDataReceiverFunc)(struct Inflater* inflater, const unsigned char* bytes, size_t numberOfBytes);
@@ -135,55 +98,6 @@ typedef struct Inflater {
     InfData     providedData;
 
 } Inflater;
-
-/** The current state of the inflate process (all this info is hidden behind the `Inflater` pointer) */
-typedef struct Inf_State {
-    
-    Inflater pub; /**< The public data exposed in the `Inflater` pointer */
-    
-    /* HIDDEN: data used directly by the inflate process */
-    unsigned       step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
-    unsigned       isLastBlock;     /**< TRUE (1) when processing the last block of the data set              */
-    unsigned       symcount;        /**< The number of symbols used in front,literal & distance decoders      */
-    unsigned       literal;         /**< literal value to output                                              */
-    unsigned       sequence_dist;   /**< distance of the sequence to output                                   */
-    unsigned       sequence_len;    /**< length of the sequence to output                                     */
-    const InfHuff* frontDecoder;    /**< The huffman decoder used to decode the next 2 huffman decoders (it's crazy!) */
-    const InfHuff* literalDecoder;  /**< The literal+length huffman decoder                                   */
-    const InfHuff* distanceDecoder; /**< The distance huffman decoder                                         */
-    InfHuff        huffmanTableA[Inf_HuffTableSize]; /**< pri. buffer where huffman tables used by decoders are stored */
-    InfHuff        huffmanTableB[Inf_HuffTableSize]; /**< sec. buffer where huffman tables used by decoders are stored */
-
-    /* HIDDEN: bitbuffer */
-    struct {
-        unsigned bits;  /**< the bitbuffer bits              */
-        unsigned size;  /**< number of bits in `bitbuf.bits` */
-    } bitbuf;
-    
-    /* HIDDEN: symbol-length list used to create the huffman tables */
-    struct {
-        /* the final list is sorted by the `length` value, the resulting of concatenating all these partial lists */
-        InfSymlen* headPtr[Inf_LastValidLength+1];  /**< heads pointers, one by list (each list represents a length) */
-        InfSymlen* tailPtr[Inf_LastValidLength+1];  /**< tails pointers, one by list (each list represents a length) */
-        InfSymlen  elements[Inf_LastValidSymbol+1]; /**< Free elements to be added to the list */
-        int        elementIndex;                    /**< Index to the next free element that is ready to be added */
-    } symlenList;
-    
-    /* HIDDEN: symbol-length list reader */
-    struct {
-        unsigned      command;             /**< current command, ex: InfCmd_CopyPreviousLength        */
-        unsigned      symbol;              /**< current symbol value                                  */
-        unsigned      huffmanLength;       /**< last huffman-length read                              */
-        unsigned      repetitions;         /**< number of repetitions of the last huffman-length read */
-        unsigned char lengthsBySymbol[19]; /**< Array used to sort lengths by symbol number           */
-    } reader;
-
-} Inf_State;
-
-
-
-
-
 
 extern Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize);
 extern InfAction inflaterProcessChunk(Inflater* inflater, void* outputBuffer, size_t outputBufferSize, const void* inputBuffer, size_t inputBufferSize);

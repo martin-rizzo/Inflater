@@ -35,19 +35,32 @@
 #include <string.h>
 #include <stdio.h>
 
-
 /*====================================================================================================================*/
 #pragma mark  -  CONSTANTS AND MACROS
 
 static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 
+/** Macro to access to the full internal state */
+#define inf (*(Inf_State*)infptr)
+
+#define InfMinBufferSize    (32*1024)
+#define InfHelperBufferSize (64*1024)
+
+#define Inf_EndOfBlock           256
+#define Inf_MaxValidLengthCode   285
+#define Inf_MaxValidDistanceCode 29
+#define Inf_LastValidLength      18
+#define Inf_LastValidSymbol      290
+#define Inf_CodeLengthMapSize    ((Inf_LastValidLength+1)+(Inf_LastValidSymbol+1))
+#define Inf_NextIndexMask        0x03FF
+#define Inf_MainTableSize        256      /**< 8bits                        */
+#define Inf_HuffTableSize        (2*1024) /**< main-table + all sub-tables  */
 
 #define Inf_LastValidLength 18
 #define Inf_InvalidLength   24
 #define Inf_SymlenSequenceSize 19
 #define Inf_CodeLengthTableSize ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
 
-#define inf (*(Inf_State*)infptr)
 
 /* Macros used for control flow inside the 'inflateProcessChunk(..) function */
 #define inf__FILL_INPUT_BUFFER()                             inf.pub.action=InfAction_FillInputBuffer;            break;
@@ -56,6 +69,50 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 #define inf__ERROR(err)             step=InfStep_FatalError; inf.pub.action=InfAction_Finish; inf.pub.error=err;  break;
 #define inf__goto(dest_step)        step=dest_step;                                                               break;
 #define inf__fallthrough(next_step) step=next_step;
+
+
+#define InfHuff_Decode(table, tmp, bitbuffer) \
+    (tmp=table[bitbuffer & 0xFF], tmp.value.isvalid ? tmp : table[ tmp.subtable.index + ((bitbuffer>>8) & tmp.subtable.mask) ])
+
+
+typedef enum InfMode {
+    InfMode_Uninitialized,
+    InfMode_Take,
+    InfMode_Feed
+} InflaterMode;
+
+typedef enum InfFlags {
+    InfFlags_FreeOutputBuffer,
+    InfFlags_FreeInputBuffer,
+    InfFlags_FreeItself
+} InfFlags;
+
+typedef enum InfStep {
+    InfStep_Start,
+    InfStep_ProcessNextBlock,
+    InfStep_ReadBlockHeader,
+    
+    InfStep_Load_FixedHuffmanDecoders,
+    InfStep_Load_DynamicHuffmanDecoders,
+    InfStep_Load_FrontHuffmanTable,
+    InfStep_Load_LiteralHuffmanTable,
+    InfStep_Load_DistanceHuffmanTable,
+    
+    InfStep_Process_UncompressedBlock,
+    InfStep_Process_CompressedBlock,
+    
+    InfStep_Read_LiteralOrLength,
+    InfStep_Read_LiteralOrLength2,
+    InfStep_Read_LengthBits,
+    InfStep_Read_Distance,
+    InfStep_Read_DistanceBits,
+    
+    InfStep_Output_UncompressedBlock,
+    InfStep_Output_RepeatedSequence,
+    
+    InfStep_FatalError,
+    InfStep_End
+} InfStep;
 
 static const unsigned char Inf_Reverse[256] = {
   0x00, 0x80, 0x40, 0xC0, 0x20, 0xA0, 0x60, 0xE0, 0x10, 0x90, 0x50, 0xD0, 0x30, 0xB0, 0x70, 0xF0,
@@ -76,9 +133,70 @@ static const unsigned char Inf_Reverse[256] = {
   0x0F, 0x8F, 0x4F, 0xCF, 0x2F, 0xAF, 0x6F, 0xEF, 0x1F, 0x9F, 0x5F, 0xDF, 0x3F, 0xBF, 0x7F, 0xFF
 };
 
+typedef int InfBool; /**< Boolean value */
+#define Inf_FALSE 0
+#define Inf_TRUE  1
 
-#define InfHuff_Decode(table, tmp, bitbuffer) \
-    (tmp=table[bitbuffer & 0xFF], tmp.value.isvalid ? tmp : table[ tmp.subtable.index + ((bitbuffer>>8) & tmp.subtable.mask) ])
+typedef struct InfSymlen {
+    unsigned  symbol;        /**< The decoded value attached to the huffman code */
+    unsigned  huffmanLength; /**< The huffman code length (in number of bits)    */
+    struct InfSymlen* next;
+} InfSymlen;
+
+typedef union InfHuff {
+    struct value    { unsigned length:15, isvalid:1,  code:15; } value;
+    struct subtable { unsigned   mask:15,   error:1, index:15; } subtable;
+    unsigned raw;
+} InfHuff;
+
+#define InfHuff_Set(s, huff, hufflen, byte) s.value.code=byte; s.value.isvalid=1; s.value.length=hufflen
+#define InfHuff_SubTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
+#define InfHuff_Const(code_,length_) { length_, 1, code_ }
+
+
+/** The current state of the inflate process (all this info is hidden behind the `Inflater` pointer) */
+typedef struct Inf_State {
+    
+    Inflater pub; /**< The public data exposed in the `Inflater` pointer */
+    
+    /* Data used directly by the inflate process */
+    unsigned       step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
+    unsigned       isLastBlock;     /**< TRUE (1) when processing the last block of the data set              */
+    unsigned       symcount;        /**< The number of symbols used in front,literal & distance decoders      */
+    unsigned       literal;         /**< literal value to output                                              */
+    unsigned       sequence_dist;   /**< distance of the sequence to output                                   */
+    unsigned       sequence_len;    /**< length of the sequence to output                                     */
+    const InfHuff* frontDecoder;    /**< The huffman decoder used to decode the next 2 huffman decoders (it's crazy!) */
+    const InfHuff* literalDecoder;  /**< The literal+length huffman decoder                                   */
+    const InfHuff* distanceDecoder; /**< The distance huffman decoder                                         */
+    InfHuff        huffmanTableA[Inf_HuffTableSize]; /**< pri. buffer where huffman tables used by decoders are stored */
+    InfHuff        huffmanTableB[Inf_HuffTableSize]; /**< sec. buffer where huffman tables used by decoders are stored */
+
+    /* Bitbuffer */
+    struct {
+        unsigned bits;  /**< the bitbuffer bits              */
+        unsigned size;  /**< number of bits in `bitbuf.bits` */
+    } bitbuf;
+    
+    /* Symbol-length list used to create the huffman tables */
+    struct {
+        /* the final list is sorted by the `length` value, the resulting of concatenating all these partial lists */
+        InfSymlen* headPtr[Inf_LastValidLength+1];  /**< heads pointers, one by list (each list represents a length) */
+        InfSymlen* tailPtr[Inf_LastValidLength+1];  /**< tails pointers, one by list (each list represents a length) */
+        InfSymlen  elements[Inf_LastValidSymbol+1]; /**< Free elements to be added to the list */
+        int        elementIndex;                    /**< Index to the next free element that is ready to be added */
+    } symlenList;
+    
+    /* Symbol-length list reader */
+    struct {
+        unsigned      command;             /**< current command, ex: InfCmd_CopyPreviousLength        */
+        unsigned      symbol;              /**< current symbol value                                  */
+        unsigned      huffmanLength;       /**< last huffman-length read                              */
+        unsigned      repetitions;         /**< number of repetitions of the last huffman-length read */
+        unsigned char lengthsBySymbol[19]; /**< Array used to sort lengths by symbol number           */
+    } reader;
+
+} Inf_State;
 
 
 /*====================================================================================================================*/
@@ -400,61 +518,7 @@ static InfHuff* InfHuff_GetFixedDistanceDecoder(Inflater* infptr) {
 
 
 /*====================================================================================================================*/
-#pragma mark  -  ???
-
-
-typedef enum InfMode {
-    InfMode_Uninitialized,
-    InfMode_Take,
-    InfMode_Feed
-} InflaterMode;
-
-typedef enum InfFlags {
-    InfFlags_FreeOutputBuffer,
-    InfFlags_FreeInputBuffer,
-    InfFlags_FreeItself
-} InfFlags;
-
-typedef enum BlockType {
-    BlockType_Uncompressed   = 0,
-    BlockType_FixedHuffman   = 1,
-    BlockType_DynamicHuffman = 2
-} BlockType;
-
-
-
-
-typedef enum InfStep {
-    InfStep_Start,
-    InfStep_ProcessNextBlock,
-    InfStep_ReadBlockHeader,
-    
-    InfStep_Load_FixedHuffmanDecoders,
-    InfStep_Load_DynamicHuffmanDecoders,
-    InfStep_Load_FrontHuffmanTable,
-    InfStep_Load_LiteralHuffmanTable,
-    InfStep_Load_DistanceHuffmanTable,
-    
-    InfStep_Process_UncompressedBlock,
-    InfStep_Process_CompressedBlock,
-    
-    InfStep_Read_LiteralOrLength,
-    InfStep_Read_LiteralOrLength2,
-    InfStep_Read_LengthBits,
-    InfStep_Read_Distance,
-    InfStep_Read_DistanceBits,
-    
-    InfStep_Output_UncompressedBlock,
-    InfStep_Output_RepeatedSequence,
-    
-    InfStep_FatalError,
-    InfStep_End
-} InfStep;
-
-
-/*====================================================================================================================*/
 #pragma mark  -  IMPLEMENTATION OF PUBLIC FUNCTIONS
-
 
 Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
     unsigned length;
@@ -539,6 +603,12 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
         0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
         7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
         12, 12, 13, 13};
+    enum BlockType {
+         BlockType_Uncompressed   = 0,
+         BlockType_FixedHuffman   = 1,
+         BlockType_DynamicHuffman = 2
+    };
+
     
     InfBool canReadAll; InfStep step; size_t numberOfBytes; unsigned temp; unsigned char *sequencePtr, *writePtr;
     unsigned char* const writeEnd = ((Byte*)outputBuffer + outputBufferSize);
@@ -858,8 +928,6 @@ void inflaterDestroy(Inflater* infptr) {
         if (0!=(inf.pub.flags & InfFlags_FreeItself       )) { free((void*)infptr);                      }
     }
 }
-
-
 
 
 #undef inf__FILL_INPUT_BUFFER
