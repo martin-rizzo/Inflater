@@ -47,14 +47,14 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 #define Inf_SymlenSequenceSize 19
 #define Inf_CodeLengthTableSize ((Inf_LastValidLength+1)+(Inf_LastValidCode+1))
 
-#define inf (*infptr)
+#define inf (*(Inf_State*)infptr)
 
 /* Macros used for control flow inside the 'inflateProcessChunk(..) function */
-#define inf__FILL_INPUT_BUFFER()                             inf.action=InfAction_FillInputBuffer;        break;
-#define inf__USE_OUTPUT_BUFFER_CONTENT()                     inf.action=InfAction_UseOutputBufferContent; break;
-#define inf__FINISH()               step=InfStep_End;        inf.action=InfAction_Finish;                 break;
-#define inf__ERROR(err)             step=InfStep_FatalError; inf.action=InfAction_Finish; inf.error=err;  break;
-#define inf__goto(dest_step)        step=dest_step;                                                       break;
+#define inf__FILL_INPUT_BUFFER()                             inf.pub.action=InfAction_FillInputBuffer;            break;
+#define inf__USE_OUTPUT_BUFFER_CONTENT()                     inf.pub.action=InfAction_UseOutputBufferContent;     break;
+#define inf__FINISH()               step=InfStep_End;        inf.pub.action=InfAction_Finish;                     break;
+#define inf__ERROR(err)             step=InfStep_FatalError; inf.pub.action=InfAction_Finish; inf.pub.error=err;  break;
+#define inf__goto(dest_step)        step=dest_step;                                                               break;
 #define inf__fallthrough(next_step) step=next_step;
 
 static const unsigned char Inf_Reverse[256] = {
@@ -86,8 +86,8 @@ static const unsigned char Inf_Reverse[256] = {
 
 /** Loads the next byte (8 bits) from the input stream to the bitbuffer */
 static InfBool InfBS_LoadNextByte(Inflater* infptr) {
-    if (inf.inputChunkPtr==inf.inputChunkEnd) { return Inf_FALSE; }
-    inf.bitbuf.bits |= (*inf.inputChunkPtr++ << inf.bitbuf.size);
+    if (inf.pub.inputChunkPtr==inf.pub.inputChunkEnd) { return Inf_FALSE; }
+    inf.bitbuf.bits |= (*inf.pub.inputChunkPtr++ << inf.bitbuf.size);
     inf.bitbuf.size += 8;
     return Inf_TRUE;
 }
@@ -143,9 +143,9 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
     size_t numberOfRequestedBytes, successfulBytes;
     assert( infptr!=NULL && dest!=NULL && inout_numberOfBytes!=NULL && inf.bitbuf.size==0 );
     numberOfRequestedBytes = (*inout_numberOfBytes);
-    successfulBytes        = min( numberOfRequestedBytes, (inf.inputChunkEnd-inf.inputChunkPtr) );
-    memcpy(dest, inf.inputChunkPtr, successfulBytes);
-    inf.inputChunkPtr += successfulBytes;
+    successfulBytes        = min( numberOfRequestedBytes, (inf.pub.inputChunkEnd-inf.pub.inputChunkPtr) );
+    memcpy(dest, inf.pub.inputChunkPtr, successfulBytes);
+    inf.pub.inputChunkPtr += successfulBytes;
     (*inout_numberOfBytes) = successfulBytes;
     return (successfulBytes == numberOfRequestedBytes);
 }
@@ -458,32 +458,32 @@ typedef enum InfStep {
 
 Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
     unsigned length;
-    Inflater* infptr = (Inflater*)malloc(sizeof(Inflater));
+    Inf_State* infptr = (Inf_State*)malloc(sizeof(Inf_State));
     
-    inf.mode            = InfMode_Uninitialized;
-    inf.flags           = InfFlags_FreeItself;
-    inf.action          = InfAction_Init;
-    inf.error           = InfError_None;
+    inf.pub.mode            = InfMode_Uninitialized;
+    inf.pub.flags           = InfFlags_FreeItself;
+    inf.pub.action          = InfAction_Init;
+    inf.pub.error           = InfError_None;
     
-    inf.userPtr          = NULL;
-    inf.dataProviderFunc = NULL;
-    inf.dataReceiverFunc = NULL;
+    inf.pub.userPtr          = NULL;
+    inf.pub.dataProviderFunc = NULL;
+    inf.pub.dataReceiverFunc = NULL;
     
-    inf.inputChunkPtr   = NULL;
-    inf.inputChunkEnd   = NULL;
-    inf.outputChunk     = NULL;
-    inf.outputChunkSize = 0;
-    inf.outputBufferContentSize = 0;
+    inf.pub.inputChunkPtr   = NULL;
+    inf.pub.inputChunkEnd   = NULL;
+    inf.pub.outputChunk     = NULL;
+    inf.pub.outputChunkSize = 0;
+    inf.pub.outputBufferContentSize = 0;
     
     /*---- inflaterTake / inflaterFeed ----------- */
-    inf.helperOutput.buffer     = NULL;
-    inf.helperOutput.bufferSize = 0;
-    inf.helperInput.buffer      = NULL;
-    inf.helperInput.bufferSize  = 0;
-    inf.takeOutputPtr           = NULL;
-    inf.takeOutputRemaining     = 0;
-    inf.providedData.buffer     = NULL;
-    inf.providedData.bufferSize = 0;
+    inf.pub.helperOutput.buffer     = NULL;
+    inf.pub.helperOutput.bufferSize = 0;
+    inf.pub.helperInput.buffer      = NULL;
+    inf.pub.helperInput.bufferSize  = 0;
+    inf.pub.takeOutputPtr           = NULL;
+    inf.pub.takeOutputRemaining     = 0;
+    inf.pub.providedData.buffer     = NULL;
+    inf.pub.providedData.bufferSize = 0;
     
     /*---- decompress ---------------------------- */
     inf.step        = 0;
@@ -502,10 +502,11 @@ Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
 
     
     if (workingBuffer!=NULL && workingBufferSize>=InfHelperBufferSize) {
-        inf.helperOutput.buffer     = workingBuffer;
-        inf.helperOutput.bufferSize = workingBufferSize;
+        inf.pub.helperOutput.buffer     = workingBuffer;
+        inf.pub.helperOutput.bufferSize = workingBufferSize;
     }
-    return infptr;
+    assert( (Inflater*)infptr == &inf.pub );
+    return (Inflater*)infptr;
 }
 
 /**
@@ -545,39 +546,39 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
     assert( inputBuffer !=NULL && inputBufferSize >0 );
     assert( outputBuffer!=NULL && outputBufferSize>0 );
 
-    switch ( inf.action ) {
+    switch ( inf.pub.action ) {
         case InfAction_Init:
-            inf.outputChunk   = (Byte      *)outputBuffer;
-            inf.inputChunkPtr = (const Byte*)inputBuffer;
-            inf.inputChunkEnd = inf.inputChunkPtr + inputBufferSize;
+            inf.pub.outputChunk   = (Byte      *)outputBuffer;
+            inf.pub.inputChunkPtr = (const Byte*)inputBuffer;
+            inf.pub.inputChunkEnd = inf.pub.inputChunkPtr + inputBufferSize;
             break;
         case InfAction_FillInputBuffer:
-            inf.outputChunk  += inf.outputChunkSize;
-            inf.inputChunkPtr = (const Byte*)inputBuffer;
-            inf.inputChunkEnd = inf.inputChunkPtr + inputBufferSize;
+            inf.pub.outputChunk  += inf.pub.outputChunkSize;
+            inf.pub.inputChunkPtr = (const Byte*)inputBuffer;
+            inf.pub.inputChunkEnd = inf.pub.inputChunkPtr + inputBufferSize;
             break;
         case InfAction_UseOutputBufferContent:
-            inf.outputChunk = (Byte*)outputBuffer;
-            inf.outputBufferContentSize = 0;
+            inf.pub.outputChunk = (Byte*)outputBuffer;
+            inf.pub.outputBufferContentSize = 0;
             break;
         case InfAction_ProcessNextChunk:
-            inf.outputChunk += inf.outputChunkSize;
+            inf.pub.outputChunk += inf.pub.outputChunkSize;
             break;
         default: /* InfAction_Finish */
-            inf.outputChunkSize = 0;
-            return inf.action;
+            inf.pub.outputChunkSize = 0;
+            return inf.pub.action;
     }
 
-    assert( inf.inputChunkPtr!=NULL );
-    assert( inf.inputChunkPtr<=inf.inputChunkEnd );
-    assert( inf.outputChunk!=NULL && inf.outputChunk<writeEnd );
+    assert( inf.pub.inputChunkPtr!=NULL );
+    assert( inf.pub.inputChunkPtr<=inf.pub.inputChunkEnd );
+    assert( inf.pub.outputChunk!=NULL && inf.pub.outputChunk<writeEnd );
     assert( outputBuffer!=NULL );
     assert( outputBufferSize>=(32*1024) );
     
-    step       = (InfStep)inf.step;
-    writePtr   = inf.outputChunk;
-    inf.action = InfAction_ProcessNextChunk;
-    while ( inf.action==InfAction_ProcessNextChunk ) {
+    step           = (InfStep)inf.step;
+    writePtr       = inf.pub.outputChunk;
+    inf.pub.action = InfAction_ProcessNextChunk;
+    while ( inf.pub.action==InfAction_ProcessNextChunk ) {
         switch (step) {
                 
             case InfStep_Start:
@@ -589,7 +590,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              */
             case InfStep_ProcessNextBlock:
                 if (inf.isLastBlock) {
-                    if (writePtr > inf.outputChunk) {
+                    if (writePtr > inf.pub.outputChunk) {
                         printf(" > END (use remaining output buffer)\n");
                         inf__USE_OUTPUT_BUFFER_CONTENT();
                     }
@@ -733,11 +734,11 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
         }
     }
     
-    inf.step                     = (unsigned)step;
-    inf.outputChunkSize          = (writePtr - inf.outputChunk);
-    inf.outputBufferContentSize += inf.outputChunkSize;
-    printf(" # inf.action = %d\n", inf.action);
-    return inf.action;
+    inf.step                         = (unsigned)step;
+    inf.pub.outputChunkSize          = (writePtr - inf.pub.outputChunk);
+    inf.pub.outputBufferContentSize += inf.pub.outputChunkSize;
+    printf(" # inf.action = %d\n", inf.pub.action);
+    return inf.pub.action;
 }
 
 
@@ -755,38 +756,38 @@ size_t inflaterTake(Inflater* infptr, void* decompressedData, size_t decompresse
     int fillInputBuffer;
 
     /* initialization */
-    assert( (inf.mode==InfMode_Uninitialized) || (inf.mode==InfMode_Take) );
-    if (inf.mode==InfMode_Uninitialized) {
-        inf.mode= InfMode_Take;
-        if (inf.helperOutput.buffer==NULL) {
-            inf.helperOutput.buffer = malloc( inf.helperOutput.bufferSize=InfHelperBufferSize );
-            inf.flags |= InfFlags_FreeOutputBuffer;
+    assert( (inf.pub.mode==InfMode_Uninitialized) || (inf.pub.mode==InfMode_Take) );
+    if (inf.pub.mode==InfMode_Uninitialized) {
+        inf.pub.mode= InfMode_Take;
+        if (inf.pub.helperOutput.buffer==NULL) {
+            inf.pub.helperOutput.buffer = malloc( inf.pub.helperOutput.bufferSize=InfHelperBufferSize );
+            inf.pub.flags |= InfFlags_FreeOutputBuffer;
         }
-        if (inf.helperInput.buffer==NULL) {
-            inf.helperInput.buffer  = malloc( inf.helperInput.bufferSize=InfHelperBufferSize );
-            inf.flags |= InfFlags_FreeInputBuffer;
+        if (inf.pub.helperInput.buffer==NULL) {
+            inf.pub.helperInput.buffer  = malloc( inf.pub.helperInput.bufferSize=InfHelperBufferSize );
+            inf.pub.flags |= InfFlags_FreeInputBuffer;
         }
-        inf.takeOutputPtr           = (Byte*)inf.helperOutput.buffer;
-        inf.takeOutputRemaining     = 0;
-        inf.providedData.buffer     = NULL;
-        inf.providedData.bufferSize = 0;
+        inf.pub.takeOutputPtr           = (Byte*)inf.pub.helperOutput.buffer;
+        inf.pub.takeOutputRemaining     = 0;
+        inf.pub.providedData.buffer     = NULL;
+        inf.pub.providedData.bufferSize = 0;
     }
 
-    outputBuffer         = (Byte*)inf.helperOutput.buffer;
-    outputBufferSize     =        inf.helperOutput.bufferSize;
-    sour                 =        inf.takeOutputPtr;
-    sourAvailableBytes   =        inf.takeOutputRemaining;
+    outputBuffer         = (Byte*)inf.pub.helperOutput.buffer;
+    outputBufferSize     =        inf.pub.helperOutput.bufferSize;
+    sour                 =        inf.pub.takeOutputPtr;
+    sourAvailableBytes   =        inf.pub.takeOutputRemaining;
     dest                 = (Byte*)decompressedData;
     destBytesStillNeeded =        decompressedDataSize;
     
     
-    if ( inf.action==InfAction_Finish ) { return 0; }
+    if ( inf.pub.action==InfAction_Finish ) { return 0; }
 
-    while ( destBytesStillNeeded>0 && inf.action!=InfAction_Finish )
+    while ( destBytesStillNeeded>0 && inf.pub.action!=InfAction_Finish )
     {
-        fillInputBuffer = (inf.action==InfAction_Init || inf.action==InfAction_FillInputBuffer);
+        fillInputBuffer = (inf.pub.action==InfAction_Init || inf.pub.action==InfAction_FillInputBuffer);
         
-        if (inf.action==InfAction_UseOutputBufferContent && sourAvailableBytes>0 ) {
+        if (inf.pub.action==InfAction_UseOutputBufferContent && sourAvailableBytes>0 ) {
             /* take available bytes */
             const size_t size = sourAvailableBytes<destBytesStillNeeded ? sourAvailableBytes : destBytesStillNeeded;
             memcpy(dest,sour,size); dest+=size; destBytesStillNeeded-=size; sour+=size; sourAvailableBytes-=size;
@@ -794,19 +795,19 @@ size_t inflaterTake(Inflater* infptr, void* decompressedData, size_t decompresse
         }
         if ( fillInputBuffer ) {
             /* get compressed data from the data provider (when required) */
-            if (inf.action==InfAction_Init || inf.action==InfAction_FillInputBuffer) {
-                inf.providedData=inf.helperInput;
-                inf.dataProviderFunc(infptr, &inf.providedData );
-                if ( inf.providedData.bufferSize==0 ) { break; }
+            if (inf.pub.action==InfAction_Init || inf.pub.action==InfAction_FillInputBuffer) {
+                inf.pub.providedData=inf.pub.helperInput;
+                inf.pub.dataProviderFunc(&inf.pub, &inf.pub.providedData );
+                if ( inf.pub.providedData.bufferSize==0 ) { break; }
             }
             /* decompress the provided data and generate more sourAvailableBytes */
             do {
-                inflaterProcessChunk(infptr, outputBuffer, outputBufferSize, inf.providedData.buffer, inf.providedData.bufferSize);
-                sourAvailableBytes += inf.outputChunkSize;
-            } while ( inf.action==InfAction_ProcessNextChunk );
+                inflaterProcessChunk(infptr, outputBuffer, outputBufferSize, inf.pub.providedData.buffer, inf.pub.providedData.bufferSize);
+                sourAvailableBytes += inf.pub.outputChunkSize;
+            } while ( inf.pub.action==InfAction_ProcessNextChunk );
         }
     }
-    inf.takeOutputPtr=sour; inf.takeOutputRemaining=sourAvailableBytes;
+    inf.pub.takeOutputPtr=sour; inf.pub.takeOutputRemaining=sourAvailableBytes;
     return (decompressedDataSize-destBytesStillNeeded);
 }
 
@@ -819,25 +820,25 @@ size_t inflaterTake(Inflater* infptr, void* decompressedData, size_t decompresse
 size_t inflaterFeed(Inflater* infptr, const void* compressedData, size_t compressedDataSize) {
     InfAction action; /* size_t numberOfConsumedBytes=0; */
     Byte* outputBuffer; size_t outputBufferSize;
-    assert( (inf.mode==InfMode_Uninitialized) || (inf.mode=InfMode_Feed) );
-    assert( inf.dataReceiverFunc!=NULL );
+    assert( (inf.pub.mode==InfMode_Uninitialized) || (inf.pub.mode=InfMode_Feed) );
+    assert( inf.pub.dataReceiverFunc!=NULL );
 
     /* initialization */
-    if (inf.mode==InfMode_Uninitialized) {
-        inf.mode= InfMode_Feed;
-        if (inf.helperOutput.buffer==NULL) {
-            inf.helperOutput.buffer = (Byte*)malloc( inf.helperOutput.bufferSize=InfHelperBufferSize );
-            inf.flags = InfFlags_FreeOutputBuffer;
+    if (inf.pub.mode==InfMode_Uninitialized) {
+        inf.pub.mode= InfMode_Feed;
+        if (inf.pub.helperOutput.buffer==NULL) {
+            inf.pub.helperOutput.buffer = (Byte*)malloc( inf.pub.helperOutput.bufferSize=InfHelperBufferSize );
+            inf.pub.flags = InfFlags_FreeOutputBuffer;
         }
     }
     
     /* decompression */
-    outputBuffer     = (Byte*)inf.helperOutput.buffer;
-    outputBufferSize =        inf.helperOutput.bufferSize;
+    outputBuffer     = (Byte*)inf.pub.helperOutput.buffer;
+    outputBufferSize =        inf.pub.helperOutput.bufferSize;
     do {
         action = inflaterProcessChunk(infptr, outputBuffer, outputBufferSize, compressedData, compressedDataSize);
         if (action==InfAction_UseOutputBufferContent) {
-            inf.dataReceiverFunc(infptr, outputBuffer, inf.outputBufferContentSize);
+            inf.pub.dataReceiverFunc(&inf.pub, outputBuffer, inf.pub.outputBufferContentSize);
         }
         /* numberOfConsumedBytes += inf.inputChunkSize; */
     } while (action==InfAction_ProcessNextChunk || action==InfAction_UseOutputBufferContent);
@@ -852,9 +853,9 @@ size_t inflaterFeed(Inflater* infptr, const void* compressedData, size_t compres
 void inflaterDestroy(Inflater* infptr) {
     if (infptr) {
         /* delete inf.obj; */
-        if (0!=(inf.flags & InfFlags_FreeInputBuffer  )) { free((void*)inf.helperInput.buffer);  }
-        if (0!=(inf.flags & InfFlags_FreeOutputBuffer )) { free((void*)inf.helperOutput.buffer); }
-        if (0!=(inf.flags & InfFlags_FreeItself       )) { free((void*)infptr);                  }
+        if (0!=(inf.pub.flags & InfFlags_FreeInputBuffer  )) { free((void*)inf.pub.helperInput.buffer);  }
+        if (0!=(inf.pub.flags & InfFlags_FreeOutputBuffer )) { free((void*)inf.pub.helperOutput.buffer); }
+        if (0!=(inf.pub.flags & InfFlags_FreeItself       )) { free((void*)infptr);                      }
     }
 }
 

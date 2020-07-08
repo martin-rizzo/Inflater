@@ -133,7 +133,13 @@ typedef struct Inflater {
     const Byte* takeOutputPtr;
     size_t      takeOutputRemaining;
     InfData     providedData;
+
+} Inflater;
+
+/** The current state of the inflate process (all this info is hidden behind the `Inflater` pointer) */
+typedef struct Inf_State {
     
+    Inflater pub; /**< The public data exposed in the `Inflater` pointer */
     
     /* HIDDEN: data used directly by the inflate process */
     unsigned       step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
@@ -172,7 +178,7 @@ typedef struct Inflater {
         unsigned char lengthsBySymbol[19]; /**< Array used to sort lengths by symbol number           */
     } reader;
 
-} Inflater;
+} Inf_State;
 
 
 
