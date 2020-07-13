@@ -142,11 +142,33 @@ typedef union InfHuff {
 #define InfHuff_SubTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
 #define InfHuff_Const(code_,length_) { length_, 1, code_ }
 
+/** The bit-buffer used to read groups of bits from the bitstream*/
+typedef struct Inf_BitBuffer {
+    unsigned bits;  /**< the bitbuffer bits              */
+    unsigned size;  /**< number of bits in `bitbuf.bits` */
+} Inf_BitBuffer;
+
+/** The symbol-length list reader */
+typedef struct Inf_SLLReader {
+    unsigned      command;             /**< current command, ex: InfCmd_CopyPreviousLength        */
+    unsigned      symbol;              /**< current symbol value                                  */
+    unsigned      huffmanLength;       /**< last huffman-length read                              */
+    unsigned      repetitions;         /**< number of repetitions of the last huffman-length read */
+    unsigned char lengthsBySymbol[19]; /**< Array used to sort lengths by symbol number           */
+    /* The final list is sorted by the `length` value,             */
+    /* it's the resulting of concatenating all these partial lists */
+    InfSymlen* headPtr[Inf_LastValidLength+1];  /**< heads pointers, one by list (each list represents a length) */
+    InfSymlen* tailPtr[Inf_LastValidLength+1];  /**< tails pointers, one by list (each list represents a length) */
+    InfSymlen  elements[Inf_LastValidSymbol+1]; /**< Free elements to be added to the list */
+    int        elementIndex;                    /**< Index to the next free element that is ready to be added */
+} Inf_SLLReader;
 
 /** The current state of the inflate process (all this info is hidden behind the `Inflater` pointer) */
 typedef struct Inf_State {
     
-    Inflater pub; /**< The public data exposed in the `Inflater` pointer */
+    Inflater      pub;    /**< The public data exposed in the `Inflater` pointer */
+    Inf_BitBuffer bitbuf; /**< The bitbuffer                                     */
+    Inf_SLLReader reader; /**< The symbol-length list reader                     */
     
     /* Data used directly by the inflate process */
     InfStep        step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
@@ -160,30 +182,6 @@ typedef struct Inf_State {
     const InfHuff* distanceDecoder; /**< The distance huffman decoder                                         */
     InfHuff        huffmanTableA[Inf_HuffTableSize]; /**< pri. buffer where huffman tables used by decoders are stored */
     InfHuff        huffmanTableB[Inf_HuffTableSize]; /**< sec. buffer where huffman tables used by decoders are stored */
-
-    /* Bitbuffer */
-    struct {
-        unsigned bits;  /**< the bitbuffer bits              */
-        unsigned size;  /**< number of bits in `bitbuf.bits` */
-    } bitbuf;
-    
-    /* Symbol-length list used to create the huffman tables */
-    struct {
-        /* the final list is sorted by the `length` value, the resulting of concatenating all these partial lists */
-        InfSymlen* headPtr[Inf_LastValidLength+1];  /**< heads pointers, one by list (each list represents a length) */
-        InfSymlen* tailPtr[Inf_LastValidLength+1];  /**< tails pointers, one by list (each list represents a length) */
-        InfSymlen  elements[Inf_LastValidSymbol+1]; /**< Free elements to be added to the list */
-        int        elementIndex;                    /**< Index to the next free element that is ready to be added */
-    } symlenList;
-    
-    /* Symbol-length list reader */
-    struct {
-        unsigned      command;             /**< current command, ex: InfCmd_CopyPreviousLength        */
-        unsigned      symbol;              /**< current symbol value                                  */
-        unsigned      huffmanLength;       /**< last huffman-length read                              */
-        unsigned      repetitions;         /**< number of repetitions of the last huffman-length read */
-        unsigned char lengthsBySymbol[19]; /**< Array used to sort lengths by symbol number           */
-    } reader;
 
 } Inf_State;
 
@@ -261,24 +259,24 @@ static InfBool InfBS_ReadBytes(Inflater* infptr, unsigned char* dest, size_t* in
 /*====================================================================================================================*/
 #pragma mark  -  READING THE SYMBOL/LENGTH LIST
 
-/** Adds a range of symbol-length pairs to the list (inf.symlenList) */
+/** Adds a range of symbol-length pairs to the list (inf.reader) */
 #define InfSL_AddRange(infptr, tmp, firstSymbol, lastSymbol, huffmanLength) \
     for (tmp=firstSymbol; tmp<lastSymbol; ++tmp) {  \
         InfSL_Add(infptr, tmp, huffmanLength);  \
     }
 
-/** Adds a symbol-length pair to the list (inf.symlenList) */
+/** Adds a symbol-length pair to the list (inf.reader) */
 static void InfSL_Add(Inflater* infptr, unsigned symbol, unsigned huffmanLength) {
     assert( 0<=symbol        &&        symbol<=Inf_LastValidSymbol );
     assert( 0<=huffmanLength && huffmanLength<=Inf_LastValidLength );
     if (huffmanLength>0) {
-        InfSymlen* const newSymlen = &inf.symlenList.elements[ inf.symlenList.elementIndex++ ];
-        InfSymlen* const last       = inf.symlenList.tailPtr[huffmanLength];
-        if (last) { last->next = newSymlen; } else { inf.symlenList.headPtr[huffmanLength] = newSymlen; }
+        InfSymlen* const newSymlen = &inf.reader.elements[ inf.reader.elementIndex++ ];
+        InfSymlen* const last       = inf.reader.tailPtr[huffmanLength];
+        if (last) { last->next = newSymlen; } else { inf.reader.headPtr[huffmanLength] = newSymlen; }
         newSymlen->symbol        = symbol;
         newSymlen->huffmanLength = huffmanLength;
         newSymlen->next          = NULL;
-        inf.symlenList.tailPtr[huffmanLength] = newSymlen;
+        inf.reader.tailPtr[huffmanLength] = newSymlen;
     }
 }
 
@@ -358,28 +356,28 @@ static InfBool InfSL_ReadCompressedSymlens(Inflater* infptr, unsigned numberOfSy
     return Inf_TRUE;
 }
 
-/** Finishes the creation of a symbol-length list (inf.symlenList) */
+/** Finishes the creation of a symbol-length list (inf.reader) */
 static const InfSymlen* InfSL_GetSortedList(Inflater* infptr, InfBool resetRepetitions) {
     int lastValidLength = 0;
     int currentLength   = 0;
     InfSymlen *firstElement, *currentHead;
     
     /* connect all lists creating a big one sorted by `length` */
-    while (inf.symlenList.headPtr[currentLength]==NULL) { ++currentLength; }
-    firstElement = inf.symlenList.headPtr[ lastValidLength = currentLength ];
+    while (inf.reader.headPtr[currentLength]==NULL) { ++currentLength; }
+    firstElement = inf.reader.headPtr[ lastValidLength = currentLength ];
     
     do {
-        do { currentHead = inf.symlenList.headPtr[ ++currentLength ];
+        do { currentHead = inf.reader.headPtr[ ++currentLength ];
         } while ( currentLength<Inf_LastValidLength && currentHead==NULL );
-        inf.symlenList.tailPtr[lastValidLength]->next = currentHead;
+        inf.reader.tailPtr[lastValidLength]->next = currentHead;
         lastValidLength = currentLength;
     } while ( currentLength<Inf_LastValidLength );
     
     /* reset */
     if (resetRepetitions) { inf.reader.command = inf.reader.huffmanLength = inf.reader.repetitions = 0; }
-    inf.symlenList.elementIndex = inf.reader.symbol = 0;
+    inf.reader.elementIndex = inf.reader.symbol = 0;
     for (currentLength=0; currentLength<=Inf_LastValidLength; ++currentLength) {
-        inf.symlenList.headPtr[currentLength] = inf.symlenList.tailPtr[currentLength] = NULL;
+        inf.reader.headPtr[currentLength] = inf.reader.tailPtr[currentLength] = NULL;
     }
     
     return firstElement;
@@ -548,9 +546,9 @@ Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
     inf.reader.huffmanLength    = 0;
     inf.reader.repetitions      = 0;
     inf.reader.symbol           = 0;
-    inf.symlenList.elementIndex = 0;
+    inf.reader.elementIndex = 0;
     for (length=0; length<=Inf_LastValidLength; ++length) {
-        inf.symlenList.headPtr[length] = inf.symlenList.tailPtr[length] = NULL;
+        inf.reader.headPtr[length] = inf.reader.tailPtr[length] = NULL;
     }
 
     
