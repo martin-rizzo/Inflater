@@ -148,15 +148,15 @@ typedef union InfHuff {
 #pragma mark  -  READING DATA FROM THE BITSTREAM
 
 /** The bitstream */
-typedef struct Inf_Bitstream {
+typedef struct Inf_BS {
     unsigned    bits;     /**< The bit-buffer                                                          */
     unsigned    size;     /**< Number of bits currently loaded in the bit-buffer                       */
     const Byte* inputPtr; /**< Pointer to the read buffer location where next byte will be loaded from */
     const Byte* inputEnd; /**< Pointer to the end of the read buffer                                   */
-} Inf_Bitstream;
+} Inf_BS;
 
-/** Loads the next byte (8 bits) from the input stream to the bitbuffer */
-static InfBool InfBS_LoadNextByte(Inf_Bitstream* bitstream) {
+/** Loads the next byte (8 bits) from the input buffer to the bit-buffer */
+static InfBool Inf_BSLoadNextByte(Inf_BS* bitstream) {
     assert( bitstream!=NULL );
     if (bitstream->inputPtr==bitstream->inputEnd) { return Inf_FALSE; }
     bitstream->bits |= (*bitstream->inputPtr++ << bitstream->size);
@@ -164,11 +164,11 @@ static InfBool InfBS_LoadNextByte(Inf_Bitstream* bitstream) {
     return Inf_TRUE;
 }
 
-/** Reads a sequence of bits from the bitbuffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
-static InfBool InfBS_ReadBits(Inf_Bitstream* bitstream, unsigned* dest, int numberOfBitsToRead) {
+/** Reads a sequence of bits from the bitstream. Returns FALSE if the bit-buffer doesn't have enought bits loaded. */
+static InfBool Inf_BSReadBits(Inf_BS* bitstream, unsigned* dest, int numberOfBitsToRead) {
     assert( bitstream!=NULL && dest!=NULL && numberOfBitsToRead>=0 );
     while (bitstream->size<numberOfBitsToRead) {
-        if (!InfBS_LoadNextByte(bitstream)) { return Inf_FALSE; }
+        if (!Inf_BSLoadNextByte(bitstream)) { return Inf_FALSE; }
     }
     (*dest) = bitstream->bits & ((1<<numberOfBitsToRead)-1);
     bitstream->bits >>= numberOfBitsToRead;
@@ -176,16 +176,16 @@ static InfBool InfBS_ReadBits(Inf_Bitstream* bitstream, unsigned* dest, int numb
     return Inf_TRUE;
 }
 
-/** Reads a sequence of huffman encoded bits from the buffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
-static InfBool InfBS_ReadCompressedBits(Inf_Bitstream* bitstream, unsigned* dest, const InfHuff* table) {
+/** Reads a sequence of huffman encoded bits from the bitstream. Returns FALSE if bit-buffer doesn't have enought bits loaded. */
+static InfBool Inf_BSReadCompressedBits(Inf_BS* bitstream, unsigned* dest, const InfHuff* table) {
     unsigned numberOfBitsToAdvance; InfHuff data, tmp;
     assert( bitstream!=NULL && dest!=NULL && table!=NULL );
 
-    if (bitstream->size==0 && !InfBS_LoadNextByte(bitstream)) { return Inf_FALSE; }
+    if (bitstream->size==0 && !Inf_BSLoadNextByte(bitstream)) { return Inf_FALSE; }
     data=InfHuff_Decode(table, tmp, bitstream->bits); numberOfBitsToAdvance=data.value.length;
     
     while (bitstream->size<numberOfBitsToAdvance) {
-        if (!InfBS_LoadNextByte(bitstream)) { return Inf_FALSE; }
+        if (!Inf_BSLoadNextByte(bitstream)) { return Inf_FALSE; }
         data=InfHuff_Decode(table, tmp, bitstream->bits); numberOfBitsToAdvance=data.value.length;
     }
     (*dest) = data.value.code;
@@ -194,23 +194,23 @@ static InfBool InfBS_ReadCompressedBits(Inf_Bitstream* bitstream, unsigned* dest
     return Inf_TRUE;
 }
 
-/** Read a DWORD (32 bits) from the bitbuffer. Returns FALSE if bitbuffer doesn't have enought bits loaded. */
-static InfBool InfBS_ReadDWord(Inf_Bitstream* bitstream, unsigned* dest) {
+/** Read a DWORD (32 bits) from the bitstream. Returns FALSE if bit-buffer doesn't have enought bits loaded. */
+static InfBool Inf_BSReadDWord(Inf_BS* bitstream, unsigned* dest) {
     static const unsigned numberOfBitsToRead = 32; /**< number of bits in a DWord */
     const unsigned        bitsToSkip         = (bitstream->size%8);
     assert( bitstream!=NULL && dest!=NULL && 8*sizeof(*dest)>=numberOfBitsToRead );
     /* skip any padding bits because bitbuffer must be byte aligned before reading a Word */
     bitstream->bits >>= bitsToSkip;
     bitstream->size  -= bitsToSkip;
-    while ( bitstream->size<numberOfBitsToRead ) { if (!InfBS_LoadNextByte(bitstream)) { return Inf_FALSE; } }
+    while ( bitstream->size<numberOfBitsToRead ) { if (!Inf_BSLoadNextByte(bitstream)) { return Inf_FALSE; } }
     assert( bitstream->size==numberOfBitsToRead );
     (*dest) = bitstream->bits;
     bitstream->bits = bitstream->size = 0;
     return Inf_TRUE;
 }
 
-/** Reads a sequence of bytes directly from the input stream (bitbuffer must be empty) */
-static InfBool InfBS_ReadBytes(Inf_Bitstream* bitstream, unsigned char* dest, size_t* inout_numberOfBytes) {
+/** Reads a sequence of ALIGNED bytes from the bitstream (bit-buffer must be empty) */
+static InfBool Inf_BSReadBytes(Inf_BS* bitstream, unsigned char* dest, size_t* inout_numberOfBytes) {
     size_t numberOfRequestedBytes, successfulBytes;
     assert( bitstream!=NULL && dest!=NULL && inout_numberOfBytes!=NULL && bitstream->size==0 );
     numberOfRequestedBytes = (*inout_numberOfBytes);
@@ -262,14 +262,14 @@ static void InfSL_Add(Inf_SLLReader* reader, unsigned symbol, unsigned huffmanLe
 }
 
 /** Adds 3bit lengths attached to a predefined sequence of symbols: 16, 17, 18, 0, 8, 7, 9, ... */
-static InfBool InfSL_ReadSymlenSequence(Inf_SLLReader* reader, Inf_Bitstream* bitstream, unsigned numberOfSymbols) {
+static InfBool InfSL_ReadSymlenSequence(Inf_SLLReader* reader, Inf_BS* bitstream, unsigned numberOfSymbols) {
     static const unsigned symbolOrder[Inf_SymlenSequenceSize] = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 };
     const unsigned end = (numberOfSymbols<Inf_SymlenSequenceSize) ? numberOfSymbols : Inf_SymlenSequenceSize;
     unsigned symbol, length;
     assert( reader!=NULL && bitstream!=NULL && numberOfSymbols>0 );
     
     while (reader->symbol<end) {
-        if ( !InfBS_ReadBits(bitstream,&length,3) ) { return Inf_FALSE; }
+        if ( !Inf_BSReadBits(bitstream,&length,3) ) { return Inf_FALSE; }
         reader->lengthsBySymbol[ symbolOrder[reader->symbol++] ] = (unsigned char)length;
     }
     while (reader->symbol<Inf_SymlenSequenceSize) {
@@ -283,7 +283,7 @@ static InfBool InfSL_ReadSymlenSequence(Inf_SLLReader* reader, Inf_Bitstream* bi
 }
 
 /** Adds a sequence of symbol-length pairs reading and decimpressing data from the bitstream */
-static InfBool InfSL_ReadCompressedSymlens(Inf_SLLReader* reader, Inf_Bitstream* bitstream, unsigned numberOfSymbols, const InfHuff* decoder) {
+static InfBool InfSL_ReadCompressedSymlens(Inf_SLLReader* reader, Inf_BS* bitstream, unsigned numberOfSymbols, const InfHuff* decoder) {
     enum InfCmd {
         InfCmd_ReadNext            = 0,  /**< load next command                     */
         InfCmd_CopyPreviousLength  = 16, /**< repeat the previous length            */
@@ -303,21 +303,21 @@ static InfBool InfSL_ReadCompressedSymlens(Inf_SLLReader* reader, Inf_Bitstream*
     {
         /* read a new command */
         if ( reader->command == InfCmd_ReadNext ) {
-            if ( !InfBS_ReadCompressedBits(bitstream, &reader->command, decoder) ) { return Inf_FALSE; }
+            if ( !Inf_BSReadCompressedBits(bitstream, &reader->command, decoder) ) { return Inf_FALSE; }
         }
         /* process command with repetition */
         switch (reader->command) {
             case InfCmd_CopyPreviousLength:
-                if ( !InfBS_ReadBits(bitstream,&value,2) ) { return Inf_FALSE; }
+                if ( !Inf_BSReadBits(bitstream,&value,2) ) { return Inf_FALSE; }
                 reader->repetitions   = 3 + value;
                 break;
             case InfCmd_RepeatZeroLength_3:
-                if ( !InfBS_ReadBits(bitstream,&value,3) ) { return Inf_FALSE; }
+                if ( !Inf_BSReadBits(bitstream,&value,3) ) { return Inf_FALSE; }
                 reader->repetitions   = 3 + value;
                 reader->huffmanLength = 0;
                 break;
             case InfCmd_RepeatZeroLength_11:
-                if ( !InfBS_ReadBits(bitstream,&value,7) ) { return Inf_FALSE; }
+                if ( !Inf_BSReadBits(bitstream,&value,7) ) { return Inf_FALSE; }
                 reader->repetitions   = 11 + value;
                 reader->huffmanLength = 0;
                 break;
@@ -469,7 +469,7 @@ static const InfHuff* InfHuff_MakeDynamicDecoder(InfHuff* table, const InfSymlen
 typedef struct Inf_State {
     
     Inflater      pub;       /**< The public data exposed in the `Inflater` pointer */
-    Inf_Bitstream bitstream; /**< The bitbuffer                                     */
+    Inf_BS        bitstream; /**< The bitbuffer                                     */
     Inf_SLLReader reader;    /**< The symbol-length list reader                     */
     
     /* Data used directly by the inflate process */
@@ -606,7 +606,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
     InfBool canReadAll; InfStep step; size_t numberOfBytes; unsigned temp; unsigned char *sequencePtr, *writePtr;
     unsigned char* const writeEnd = ((Byte*)outputBuffer + outputBufferSize);
     Inf_SLLReader* const reader    = &inf.reader;
-    Inf_Bitstream* const bitstream = &inf.bitstream;
+    Inf_BS*        const bitstream = &inf.bitstream;
     
     assert( inputBuffer !=NULL && inputBufferSize >0 );
     assert( outputBuffer!=NULL && outputBufferSize>0 );
@@ -666,7 +666,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              * infstep: READ_BLOCK_HEADER
              */
             case InfStep_READ_BLOCK_HEADER:
-                if ( !InfBS_ReadBits(bitstream,&temp,3) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BSReadBits(bitstream,&temp,3) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.isLastBlock = (temp&0x01);
                 switch (temp>>1) {
                     case BlockType_Uncompressed:   inf__goto(InfStep_PROCESS_UNCOMPRESSED_BLOCK);
@@ -680,14 +680,14 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              * infstep: PROCESS_UNCOMPRESSED_BLOCK
              */
             case InfStep_PROCESS_UNCOMPRESSED_BLOCK:
-                if ( !InfBS_ReadDWord(bitstream,&temp) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BSReadDWord(bitstream,&temp) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.sequence_len = (temp & 0xFFFF);
                 if ( inf.sequence_len != ((~temp)>>16) ) { inf__ERROR(InfError_BadBlockLength); }
                 inf__fallthrough(InfStep_OUTPUT_UNCOMPRESSED_BLOCK);
                 
             case InfStep_OUTPUT_UNCOMPRESSED_BLOCK:
                 numberOfBytes = min( inf.sequence_len, (writeEnd-writePtr) );
-                canReadAll    = InfBS_ReadBytes(bitstream, writePtr, &numberOfBytes);
+                canReadAll    = Inf_BSReadBytes(bitstream, writePtr, &numberOfBytes);
                 inf.sequence_len -= numberOfBytes;
                 writePtr         += numberOfBytes;
                 if      ( !canReadAll        ) { inf__FILL_INPUT_BUFFER();         }
@@ -707,7 +707,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              * infstep: LOAD_DYNAMIC_HUFFMAN_DECODERS
              */
             case InfStep_LOAD_DYNAMIC_HUFFMAN_DECODERS:
-                if ( !InfBS_ReadBits(bitstream,&inf.symcount,5+5+4) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BSReadBits(bitstream,&inf.symcount,5+5+4) ) { inf__FILL_INPUT_BUFFER(); }
                 inf__fallthrough(InfStep_LOAD_FRONT_DECODER);
 
             case InfStep_LOAD_FRONT_DECODER:
@@ -730,7 +730,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              */
             case InfStep_PROCESS_COMPRESSED_BLOCK:
             case InfStep_Read_LiteralOrLength:
-                if ( !InfBS_ReadCompressedBits(bitstream,&inf.literal,inf.literalDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BSReadCompressedBits(bitstream,&inf.literal,inf.literalDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 inf__fallthrough(InfStep_Read_LiteralOrLength2);
                 
             case InfStep_Read_LiteralOrLength2:
@@ -748,18 +748,18 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Read_LengthBits);
                 
             case InfStep_Read_LengthBits:
-                if ( !InfBS_ReadBits(bitstream, &temp, lengthExtraBits[inf.literal]) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BSReadBits(bitstream, &temp, lengthExtraBits[inf.literal]) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.sequence_len = temp + lengthStarts[inf.literal];
                 assert( inf.sequence_len<(32*1024) );
                 inf__fallthrough(InfStep_Read_Distance);
                 
             case InfStep_Read_Distance:
-                if ( !InfBS_ReadCompressedBits(bitstream,&inf.literal,inf.distanceDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BSReadCompressedBits(bitstream,&inf.literal,inf.distanceDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 if (inf.literal>Inf_MaxValidDistanceCode) { inf__ERROR(InfError_BadBlockContent); }
                 inf__fallthrough(InfStep_Read_DistanceBits);
                 
             case InfStep_Read_DistanceBits:
-                if ( !InfBS_ReadBits(bitstream, &temp, distanceExtraBits[inf.literal]) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BSReadBits(bitstream, &temp, distanceExtraBits[inf.literal]) ) { inf__FILL_INPUT_BUFFER(); }
                 inf.sequence_dist =  temp + distanceStarts[inf.literal];
                 assert( inf.sequence_dist<(32*1024) );
                 inf__fallthrough(InfStep_OUTPUT_SEQUENCE);
