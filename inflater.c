@@ -71,7 +71,7 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 #define inf__fallthrough(next_step) step=next_step;
 
 
-#define InfHuff_Decode(table, tmp, bitbuffer) \
+#define Inf_Huff_Decode(table, tmp, bitbuffer) \
     (tmp=table[bitbuffer & 0xFF], tmp.value.isvalid ? tmp : table[ tmp.subtable.index + ((bitbuffer>>8) & tmp.subtable.mask) ])
 
 
@@ -132,15 +132,15 @@ typedef struct InfSymlen {
     struct InfSymlen* next;
 } InfSymlen;
 
-typedef union InfHuff {
+typedef union Inf_Huff {
     struct value    { unsigned length:15, isvalid:1,  code:15; } value;
     struct subtable { unsigned   mask:15,   error:1, index:15; } subtable;
     unsigned raw;
-} InfHuff;
+} Inf_Huff;
 
-#define InfHuff_Set(s, huff, hufflen, byte) s.value.code=byte; s.value.isvalid=1; s.value.length=hufflen
-#define InfHuff_SubTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
-#define InfHuff_Const(code_,length_) { length_, 1, code_ }
+#define Inf_Huff_Set(s, huff, hufflen, byte) s.value.code=byte; s.value.isvalid=1; s.value.length=hufflen
+#define Inf_Huff_SubTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
+#define Inf_Huff_Const(code_,length_) { length_, 1, code_ }
 
 
 
@@ -177,16 +177,16 @@ static InfBool Inf_BS_ReadBits(Inf_BS* bitstream, unsigned* dest, int numberOfBi
 }
 
 /** Reads a sequence of huffman encoded bits from the bitstream. Returns FALSE if bit-buffer doesn't have enought bits loaded. */
-static InfBool Inf_BS_ReadCompressedBits(Inf_BS* bitstream, unsigned* dest, const InfHuff* table) {
-    unsigned numberOfBitsToAdvance; InfHuff data, tmp;
-    assert( bitstream!=NULL && dest!=NULL && table!=NULL );
+static InfBool Inf_BS_ReadCompressedBits(Inf_BS* bitstream, unsigned* dest, const Inf_Huff* decoder) {
+    unsigned numberOfBitsToAdvance; Inf_Huff data, tmp;
+    assert( bitstream!=NULL && dest!=NULL && decoder!=NULL );
 
     if (bitstream->size==0 && !Inf_BS_LoadNextByte(bitstream)) { return Inf_FALSE; }
-    data=InfHuff_Decode(table, tmp, bitstream->bits); numberOfBitsToAdvance=data.value.length;
+    data=Inf_Huff_Decode(decoder, tmp, bitstream->bits); numberOfBitsToAdvance=data.value.length;
     
     while (bitstream->size<numberOfBitsToAdvance) {
         if (!Inf_BS_LoadNextByte(bitstream)) { return Inf_FALSE; }
-        data=InfHuff_Decode(table, tmp, bitstream->bits); numberOfBitsToAdvance=data.value.length;
+        data=Inf_Huff_Decode(decoder, tmp, bitstream->bits); numberOfBitsToAdvance=data.value.length;
     }
     (*dest) = data.value.code;
     bitstream->bits >>= numberOfBitsToAdvance;
@@ -283,7 +283,7 @@ static InfBool Inf_SLList_Add3BitSymlens(Inf_SLList* list, Inf_BS* bitstream, un
 }
 
 /** Adds a sequence of symbol-length pairs reading and decimpressing data from the bitstream */
-static InfBool Inf_SLList_AddEncodedSymlens(Inf_SLList* list, Inf_BS* bitstream, unsigned numberOfSymlens, const InfHuff* decoder) {
+static InfBool Inf_SLList_AddEncodedSymlens(Inf_SLList* list, Inf_BS* bitstream, unsigned numberOfSymlens, const Inf_Huff* decoder) {
     enum InfCmd {
         InfCmd_ReadNext            = 0,  /**< load next command                     */
         InfCmd_CopyPreviousLength  = 16, /**< repeat the previous length            */
@@ -368,11 +368,7 @@ static const InfSymlen* Inf_SLList_GetSorted(Inf_SLList* list, InfBool resetRepe
 /*====================================================================================================================*/
 #pragma mark  -  CREATING HUFFMAN TABLE DECODERS
 
-#define InfHuff_ReverseBits(huffman, length) (                                                    \
-  ((InfHuff_ReverseArray[huffman&0xFF]<<8) | (InfHuff_ReverseArray[huffman>>8])) >> (16-(length)) \
-)
-
-#define InfHuff_NextCanonical(huffman, currentLength, newLength)  \
+#define Inf_Huff_NextCanonical(huffman, currentLength, newLength) \
     huffman       = (huffman+1) << (newLength - currentLength);   \
     huffmanLength = newLength                                     \
 
@@ -385,19 +381,19 @@ static const InfSymlen* Inf_SLList_GetSorted(Inf_SLList* list, InfBool resetRepe
  * @param byte             The decoded byte corresponding to the provided huffman code
  * @param discardedBits    Number of bits to discard (0=table, 8=sub-table)
  */
-static void InfHuff_FillTable(InfHuff*  table,
-                              unsigned  tableSize,
-                              unsigned  huffman,
-                              unsigned  huffmanLength,
-                              unsigned  byte,
-                              unsigned  discardedBits)
+static void Inf_Huff_FillTable(Inf_Huff* table,
+                               unsigned  tableSize,
+                               unsigned  huffman,
+                               unsigned  huffmanLength,
+                               unsigned  byte,
+                               unsigned  discardedBits)
 {
-    unsigned unknownBits, knownHuffman; InfHuff data;
+    unsigned unknownBits, knownHuffman; Inf_Huff data;
     const unsigned unknownStep    = (1<<(huffmanLength-discardedBits));
     const unsigned reverseHuffman = ((Inf_Reverse[huffman&0xFF]<<8)|(Inf_Reverse[huffman>>8])) >> (16-huffmanLength);
     assert( table!=NULL && huffmanLength>discardedBits && reverseHuffman<(1<<huffmanLength) );
     
-    InfHuff_Set(data, reverseHuffman, huffmanLength, byte);
+    Inf_Huff_Set(data, reverseHuffman, huffmanLength, byte);
     knownHuffman = reverseHuffman >> discardedBits;
     for (unknownBits=0; unknownBits<tableSize; unknownBits+=unknownStep) {
         table[ unknownBits | knownHuffman ] = data;
@@ -411,9 +407,9 @@ static void InfHuff_FillTable(InfHuff*  table,
  * @returns
  *      The same table pointer provided in the first parameter.
  */
-static const InfHuff* InfHuff_MakeDynamicDecoder(InfHuff* table, const InfSymlen *symlen) {
-    static const InfHuff invalid = InfHuff_Const(0, Inf_InvalidLength);
-    InfHuff data; int i, subtableIndex; const InfSymlen *symlen_end;
+static const Inf_Huff* Inf_Huff_MakeDecoder(Inf_Huff* table, const InfSymlen *symlen) {
+    static const Inf_Huff invalid = Inf_Huff_Const(0, Inf_InvalidLength);
+    Inf_Huff data; int i, subtableIndex; const InfSymlen *symlen_end;
     unsigned subtableSize, huffman, huffmanLength;
     assert( table!=NULL && symlen!=NULL  );
     
@@ -427,8 +423,8 @@ static const InfHuff* InfHuff_MakeDynamicDecoder(InfHuff* table, const InfSymlen
     /* lengths from 1 to 8                              */
     /* unknown bits are filled with all possible values */
     while ( symlen!=NULL && huffmanLength<=8 ) {
-        InfHuff_FillTable(table, 256, huffman, huffmanLength, symlen->symbol, 0);
-        if ( (symlen=symlen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
+        Inf_Huff_FillTable(table, 256, huffman, huffmanLength, symlen->symbol, 0);
+        if ( (symlen=symlen->next)!=NULL ) { Inf_Huff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
     }
     /* lengths from 9         */
     /* subtables are created  */
@@ -442,7 +438,7 @@ static const InfHuff* InfHuff_MakeDynamicDecoder(InfHuff* table, const InfSymlen
         /* calculate subtable size (and find first and last element) */
         do {
             subtableSize = huffmanLength;
-            if ( (symlen=symlen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
+            if ( (symlen=symlen->next)!=NULL ) { Inf_Huff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
         } while ( symlen!=NULL && (huffman>>(huffmanLength-8))==index );
         symlen_end   = symlen;
         subtableSize = (1<<(subtableSize-8));
@@ -451,10 +447,10 @@ static const InfHuff* InfHuff_MakeDynamicDecoder(InfHuff* table, const InfSymlen
         /* create subtable */
         huffman       = huffman_first;
         huffmanLength = symlen_first->huffmanLength;
-        table[Inf_Reverse[index]] = InfHuff_SubTableRef(data, subtableIndex, subtableSize-1);
+        table[Inf_Reverse[index]] = Inf_Huff_SubTableRef(data, subtableIndex, subtableSize-1);
         symlen = symlen_first; while ( symlen!=symlen_end ) {
-            InfHuff_FillTable(&table[subtableIndex], subtableSize, huffman, huffmanLength, symlen->symbol, 8);
-            if ( (symlen=symlen->next)!=NULL ) { InfHuff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
+            Inf_Huff_FillTable(&table[subtableIndex], subtableSize, huffman, huffmanLength, symlen->symbol, 8);
+            if ( (symlen=symlen->next)!=NULL ) { Inf_Huff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
         }
         subtableIndex += subtableSize;
     }
@@ -468,28 +464,28 @@ static const InfHuff* InfHuff_MakeDynamicDecoder(InfHuff* table, const InfSymlen
 /** The current state of the inflate process (all this info is hidden behind the `Inflater` pointer) */
 typedef struct Inf_State {
     
-    Inflater      pub;       /**< The public data exposed in the `Inflater` pointer */
-    Inf_BS        bitstream; /**< The bitbuffer                                     */
-    Inf_SLList    sllist;    /**< The symbol-length list                            */
+    Inflater   pub;       /**< The public data exposed in the `Inflater` pointer */
+    Inf_BS     bitstream; /**< The bitbuffer                                     */
+    Inf_SLList sllist;    /**< The symbol-length list                            */
     
     /* Data used directly by the inflate process */
-    InfStep        step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
-    unsigned       isLastBlock;     /**< TRUE (1) when processing the last block of the data set              */
-    unsigned       symcount;        /**< The number of symbols used in front,literal & distance decoders      */
-    unsigned       literal;         /**< literal value to output                                              */
-    unsigned       sequence_dist;   /**< distance of the sequence to output                                   */
-    unsigned       sequence_len;    /**< length of the sequence to output                                     */
-    const InfHuff* frontDecoder;    /**< The huffman decoder used to decode the next 2 huffman decoders (it's crazy!) */
-    const InfHuff* literalDecoder;  /**< The literal+length huffman decoder                                   */
-    const InfHuff* distanceDecoder; /**< The distance huffman decoder                                         */
-    InfHuff        huffmanTableA[Inf_HuffTableSize]; /**< pri. buffer where huffman tables used by decoders are stored */
-    InfHuff        huffmanTableB[Inf_HuffTableSize]; /**< sec. buffer where huffman tables used by decoders are stored */
+    InfStep         step;            /**< The current step in the inflate process, ex: InfStep_ReadBlockHeader */
+    unsigned        isLastBlock;     /**< TRUE (1) when processing the last block of the data set              */
+    unsigned        symcount;        /**< The number of symbols used in front,literal & distance decoders      */
+    unsigned        literal;         /**< literal value to output                                              */
+    unsigned        sequence_dist;   /**< distance of the sequence to output                                   */
+    unsigned        sequence_len;    /**< length of the sequence to output                                     */
+    const Inf_Huff* frontDecoder;    /**< The huffman decoder used to decode the next 2 huffman decoders (it's crazy!) */
+    const Inf_Huff* literalDecoder;  /**< The literal+length huffman decoder                                   */
+    const Inf_Huff* distanceDecoder; /**< The distance huffman decoder                                         */
+    Inf_Huff        huffmanTableA[Inf_HuffTableSize]; /**< pri. buffer where huffman tables used by decoders are stored */
+    Inf_Huff        huffmanTableB[Inf_HuffTableSize]; /**< sec. buffer where huffman tables used by decoders are stored */
 
 } Inf_State;
 
 
-static InfHuff* InfHuff_GetFixedLiteralDecoder(Inflater* infptr) {
-    static InfHuff table[Inf_HuffTableSize]; static InfBool loaded = Inf_FALSE; unsigned tmp;
+static Inf_Huff* Inf_Huff_MakeFixedLiteralDecoder(Inflater* infptr) {
+    static Inf_Huff table[Inf_HuffTableSize]; static InfBool loaded = Inf_FALSE; unsigned tmp;
     if (!loaded) {
         Inf_SLList* const list = &inf.sllist;
         loaded = Inf_TRUE;
@@ -497,18 +493,18 @@ static InfHuff* InfHuff_GetFixedLiteralDecoder(Inflater* infptr) {
         Inf_SLList_AddRange(list, tmp, 144,256, 9);
         Inf_SLList_AddRange(list, tmp, 256,280, 7);
         Inf_SLList_AddRange(list, tmp, 280,288, 8);
-        InfHuff_MakeDynamicDecoder(table, Inf_SLList_GetSorted(list, Inf_TRUE) );
+        Inf_Huff_MakeDecoder(table, Inf_SLList_GetSorted(list, Inf_TRUE) );
     }
     return table;
 }
 
-static InfHuff* InfHuff_GetFixedDistanceDecoder(Inflater* infptr) {
-    static InfHuff table[Inf_HuffTableSize]; static InfBool loaded = Inf_FALSE; unsigned tmp;
+static Inf_Huff* Inf_Huff_MakeFixedDistanceDecoder(Inflater* infptr) {
+    static Inf_Huff table[Inf_HuffTableSize]; static InfBool loaded = Inf_FALSE; unsigned tmp;
     if (!loaded) {
         Inf_SLList* const list = &inf.sllist;
         loaded = Inf_TRUE;
         Inf_SLList_AddRange(list, tmp,  0,32, 5);
-        InfHuff_MakeDynamicDecoder(table, Inf_SLList_GetSorted(list, Inf_TRUE) );
+        Inf_Huff_MakeDecoder(table, Inf_SLList_GetSorted(list, Inf_TRUE) );
     }
     return table;
 }
@@ -699,8 +695,8 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              * infstep: LOAD_FIXED_HUFFMAN_DECODERS
              */
             case InfStep_LOAD_FIXED_HUFFMAN_DECODERS:
-                inf.literalDecoder  = InfHuff_GetFixedLiteralDecoder(infptr);
-                inf.distanceDecoder = InfHuff_GetFixedDistanceDecoder(infptr);
+                inf.literalDecoder  = Inf_Huff_MakeFixedLiteralDecoder(infptr);
+                inf.distanceDecoder = Inf_Huff_MakeFixedDistanceDecoder(infptr);
                 inf__goto(InfStep_PROCESS_COMPRESSED_BLOCK);
                 
             /*-------------------------------------------------------------------------------------
@@ -712,17 +708,17 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
 
             case InfStep_LOAD_FRONT_DECODER:
                 if ( !Inf_SLList_Add3BitSymlens(sllist,bitstream,((inf.symcount>>10)&0x0F)+4) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.frontDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTableA, Inf_SLList_GetSorted(sllist,Inf_TRUE));
+                inf.frontDecoder = Inf_Huff_MakeDecoder(inf.huffmanTableA, Inf_SLList_GetSorted(sllist,Inf_TRUE));
                 inf__fallthrough(InfStep_LOAD_LITERAL_DECODER);
                 
             case InfStep_LOAD_LITERAL_DECODER:
                 if ( !Inf_SLList_AddEncodedSymlens(sllist,bitstream,(inf.symcount&0x1F)+257,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.literalDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTableB, Inf_SLList_GetSorted(sllist,Inf_FALSE));
+                inf.literalDecoder = Inf_Huff_MakeDecoder(inf.huffmanTableB, Inf_SLList_GetSorted(sllist,Inf_FALSE));
                 inf__fallthrough(InfStep_LOAD_DISTANCE_DECODER);
                 
             case InfStep_LOAD_DISTANCE_DECODER:
                 if ( !Inf_SLList_AddEncodedSymlens(sllist,bitstream,((inf.symcount>>5)&0x1F)+1,inf.frontDecoder) ) { inf__FILL_INPUT_BUFFER(); }
-                inf.distanceDecoder = InfHuff_MakeDynamicDecoder(inf.huffmanTableA, Inf_SLList_GetSorted(sllist,Inf_TRUE));
+                inf.distanceDecoder = Inf_Huff_MakeDecoder(inf.huffmanTableA, Inf_SLList_GetSorted(sllist,Inf_TRUE));
                 inf__fallthrough(InfStep_PROCESS_COMPRESSED_BLOCK);
                 
             /*-------------------------------------------------------------------------------------
