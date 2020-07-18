@@ -71,8 +71,6 @@ static size_t min(size_t a, size_t b) { return a<b ? a : b; }
 #define inf__fallthrough(next_step) step=next_step;
 
 
-#define Inf_Huff_Decode(table, tmp, bitbuffer) \
-    (tmp=table[bitbuffer & 0xFF], tmp.value.isvalid ? tmp : table[ tmp.subtable.index + ((bitbuffer>>8) & tmp.subtable.mask) ])
 
 
 typedef enum InfMode {
@@ -138,10 +136,11 @@ typedef union Inf_Huff {
     unsigned raw;
 } Inf_Huff;
 
-#define Inf_Huff_Set(s, huff, hufflen, byte) s.value.code=byte; s.value.isvalid=1; s.value.length=hufflen
-#define Inf_Huff_SubTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
-#define Inf_Huff_Const(code_,length_) { length_, 1, code_ }
-
+#define Inf_HuffConst(code_,length_) { length_, 1, code_ }
+#define Inf_Huff_SetValue(s, huff, hufflen, byte) s.value.code=byte; s.value.isvalid=1; s.value.length=hufflen
+#define Inf_Huff_SetTableRef(s, index_,mask_) (s.subtable.index=(index_), s.subtable.error=0, s.subtable.mask=(mask_), s)
+#define Inf_Huff_Decode(table, tmp, bitbuffer) \
+    (tmp=table[bitbuffer & 0xFF], tmp.value.isvalid ? tmp : table[ tmp.subtable.index + ((bitbuffer>>8) & tmp.subtable.mask) ])
 
 
 /*====================================================================================================================*/
@@ -177,7 +176,7 @@ static InfBool Inf_BS_ReadBits(Inf_BS* bitstream, unsigned* dest, int numberOfBi
 }
 
 /** Reads a sequence of huffman encoded bits from the bitstream. Returns FALSE if bit-buffer doesn't have enought bits loaded. */
-static InfBool Inf_BS_ReadCompressedBits(Inf_BS* bitstream, unsigned* dest, const Inf_Huff* decoder) {
+static InfBool Inf_BS_ReadEncodedBits(Inf_BS* bitstream, unsigned* dest, const Inf_Huff* decoder) {
     unsigned numberOfBitsToAdvance; Inf_Huff data, tmp;
     assert( bitstream!=NULL && dest!=NULL && decoder!=NULL );
 
@@ -303,7 +302,7 @@ static InfBool Inf_SLList_AddEncodedSymlens(Inf_SLList* list, Inf_BS* bitstream,
     {
         /* read a new command */
         if ( list->command == InfCmd_ReadNext ) {
-            if ( !Inf_BS_ReadCompressedBits(bitstream, &list->command, decoder) ) { return Inf_FALSE; }
+            if ( !Inf_BS_ReadEncodedBits(bitstream, &list->command, decoder) ) { return Inf_FALSE; }
         }
         /* process command with repetition */
         switch (list->command) {
@@ -393,7 +392,7 @@ static void Inf_Huff_FillTable(Inf_Huff* table,
     const unsigned reverseHuffman = ((Inf_Reverse[huffman&0xFF]<<8)|(Inf_Reverse[huffman>>8])) >> (16-huffmanLength);
     assert( table!=NULL && huffmanLength>discardedBits && reverseHuffman<(1<<huffmanLength) );
     
-    Inf_Huff_Set(data, reverseHuffman, huffmanLength, byte);
+    Inf_Huff_SetValue(data, reverseHuffman, huffmanLength, byte);
     knownHuffman = reverseHuffman >> discardedBits;
     for (unknownBits=0; unknownBits<tableSize; unknownBits+=unknownStep) {
         table[ unknownBits | knownHuffman ] = data;
@@ -408,7 +407,7 @@ static void Inf_Huff_FillTable(Inf_Huff* table,
  *      The same table pointer provided in the first parameter.
  */
 static const Inf_Huff* Inf_Huff_MakeDecoder(Inf_Huff* table, const InfSymlen *symlen) {
-    static const Inf_Huff invalid = Inf_Huff_Const(0, Inf_InvalidLength);
+    static const Inf_Huff invalid = Inf_HuffConst(0, Inf_InvalidLength);
     Inf_Huff data; int i, subtableIndex; const InfSymlen *symlen_end;
     unsigned subtableSize, huffman, huffmanLength;
     assert( table!=NULL && symlen!=NULL  );
@@ -447,7 +446,7 @@ static const Inf_Huff* Inf_Huff_MakeDecoder(Inf_Huff* table, const InfSymlen *sy
         /* create subtable */
         huffman       = huffman_first;
         huffmanLength = symlen_first->huffmanLength;
-        table[Inf_Reverse[index]] = Inf_Huff_SubTableRef(data, subtableIndex, subtableSize-1);
+        table[Inf_Reverse[index]] = Inf_Huff_SetTableRef(data, subtableIndex, subtableSize-1);
         symlen = symlen_first; while ( symlen!=symlen_end ) {
             Inf_Huff_FillTable(&table[subtableIndex], subtableSize, huffman, huffmanLength, symlen->symbol, 8);
             if ( (symlen=symlen->next)!=NULL ) { Inf_Huff_NextCanonical(huffman, huffmanLength, symlen->huffmanLength); }
@@ -455,6 +454,23 @@ static const Inf_Huff* Inf_Huff_MakeDecoder(Inf_Huff* table, const InfSymlen *sy
         subtableIndex += subtableSize;
     }
     return table;
+}
+
+static const Inf_Huff* Inf_Huff_MakeFixedLiteralDecoder(Inf_SLList* tmplist) {
+    static const Inf_Huff *cachedDecoder=NULL; static Inf_Huff table[Inf_HuffTableSize]; unsigned tmp;
+    if (cachedDecoder) { return cachedDecoder; }
+    Inf_SLList_AddRange(tmplist, tmp,   0,144, 8);
+    Inf_SLList_AddRange(tmplist, tmp, 144,256, 9);
+    Inf_SLList_AddRange(tmplist, tmp, 256,280, 7);
+    Inf_SLList_AddRange(tmplist, tmp, 280,288, 8);
+    return (cachedDecoder = Inf_Huff_MakeDecoder(table, Inf_SLList_GetSorted(tmplist, Inf_TRUE)));
+}
+
+static const Inf_Huff* Inf_Huff_MakeFixedDistanceDecoder(Inf_SLList* tmplist) {
+    static const Inf_Huff *cachedDecoder=NULL; static Inf_Huff table[Inf_HuffTableSize]; unsigned tmp;
+    if (cachedDecoder) { return cachedDecoder; }
+    Inf_SLList_AddRange(tmplist, tmp,  0,32, 5);
+    return (cachedDecoder = Inf_Huff_MakeDecoder(table, Inf_SLList_GetSorted(tmplist, Inf_TRUE)));
 }
 
 
@@ -482,34 +498,6 @@ typedef struct Inf_State {
     Inf_Huff        huffmanTableB[Inf_HuffTableSize]; /**< sec. buffer where huffman tables used by decoders are stored */
 
 } Inf_State;
-
-
-static Inf_Huff* Inf_Huff_MakeFixedLiteralDecoder(Inflater* infptr) {
-    static Inf_Huff table[Inf_HuffTableSize]; static InfBool loaded = Inf_FALSE; unsigned tmp;
-    if (!loaded) {
-        Inf_SLList* const list = &inf.sllist;
-        loaded = Inf_TRUE;
-        Inf_SLList_AddRange(list, tmp,   0,144, 8);
-        Inf_SLList_AddRange(list, tmp, 144,256, 9);
-        Inf_SLList_AddRange(list, tmp, 256,280, 7);
-        Inf_SLList_AddRange(list, tmp, 280,288, 8);
-        Inf_Huff_MakeDecoder(table, Inf_SLList_GetSorted(list, Inf_TRUE) );
-    }
-    return table;
-}
-
-static Inf_Huff* Inf_Huff_MakeFixedDistanceDecoder(Inflater* infptr) {
-    static Inf_Huff table[Inf_HuffTableSize]; static InfBool loaded = Inf_FALSE; unsigned tmp;
-    if (!loaded) {
-        Inf_SLList* const list = &inf.sllist;
-        loaded = Inf_TRUE;
-        Inf_SLList_AddRange(list, tmp,  0,32, 5);
-        Inf_Huff_MakeDecoder(table, Inf_SLList_GetSorted(list, Inf_TRUE) );
-    }
-    return table;
-}
-
-
 
 Inflater* inflaterCreate(void* workingBuffer, size_t workingBufferSize) {
     unsigned length;
@@ -695,8 +683,8 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              * infstep: LOAD_FIXED_HUFFMAN_DECODERS
              */
             case InfStep_LOAD_FIXED_HUFFMAN_DECODERS:
-                inf.literalDecoder  = Inf_Huff_MakeFixedLiteralDecoder(infptr);
-                inf.distanceDecoder = Inf_Huff_MakeFixedDistanceDecoder(infptr);
+                inf.literalDecoder  = Inf_Huff_MakeFixedLiteralDecoder (&inf.sllist);
+                inf.distanceDecoder = Inf_Huff_MakeFixedDistanceDecoder(&inf.sllist);
                 inf__goto(InfStep_PROCESS_COMPRESSED_BLOCK);
                 
             /*-------------------------------------------------------------------------------------
@@ -726,7 +714,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
              */
             case InfStep_PROCESS_COMPRESSED_BLOCK:
             case InfStep_Read_LiteralOrLength:
-                if ( !Inf_BS_ReadCompressedBits(bitstream,&inf.literal,inf.literalDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BS_ReadEncodedBits(bitstream,&inf.literal,inf.literalDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 inf__fallthrough(InfStep_Read_LiteralOrLength2);
                 
             case InfStep_Read_LiteralOrLength2:
@@ -750,7 +738,7 @@ InfAction inflaterProcessChunk(Inflater*         infptr,
                 inf__fallthrough(InfStep_Read_Distance);
                 
             case InfStep_Read_Distance:
-                if ( !Inf_BS_ReadCompressedBits(bitstream,&inf.literal,inf.distanceDecoder) ) { inf__FILL_INPUT_BUFFER(); }
+                if ( !Inf_BS_ReadEncodedBits(bitstream,&inf.literal,inf.distanceDecoder) ) { inf__FILL_INPUT_BUFFER(); }
                 if (inf.literal>Inf_MaxValidDistanceCode) { inf__ERROR(InfError_BadBlockContent); }
                 inf__fallthrough(InfStep_Read_DistanceBits);
                 
