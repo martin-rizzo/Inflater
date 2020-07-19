@@ -284,7 +284,6 @@ static InfBool Inf_SLList_Add3BitSymlens(Inf_SLList* list, Inf_BS* bitstream, un
 /** Adds a sequence of symbol-length pairs reading and decimpressing data from the bitstream */
 static InfBool Inf_SLList_AddEncodedSymlens(Inf_SLList* list, Inf_BS* bitstream, unsigned numberOfSymlens, const Inf_Huff* decoder) {
     enum InfCmd {
-        InfCmd_ReadNext            = 0,  /**< load next command                     */
         InfCmd_CopyPreviousLength  = 16, /**< repeat the previous length            */
         InfCmd_RepeatZeroLength_3  = 17, /**< repeat zero length (3 or more times)  */
         InfCmd_RepeatZeroLength_11 = 18  /**< repeat zero length (11 or more times) */
@@ -292,46 +291,46 @@ static InfBool Inf_SLList_AddEncodedSymlens(Inf_SLList* list, Inf_BS* bitstream,
     unsigned value;
     assert( list!=NULL && numberOfSymlens>0 && decoder!=NULL );
 
-    /* IMPORTANT: add any repetition that is pending from a previous load (ex: literals-decoder > distance-decoder) */
-    while (list->repetitions>0 && list->symbol<numberOfSymlens) {
-        Inf_SLList_AddSymlen(list, list->symbol, list->huffmanLength);
-        ++list->symbol; --list->repetitions;
-    }
     /* add (one by one) all symbols with their corresponding huffmanLengths taking into account the number of repetitions */
     while ( list->symbol<numberOfSymlens )
     {
-        /* read a new command */
-        if ( list->command == InfCmd_ReadNext ) {
-            if ( !Inf_BS_ReadEncodedBits(bitstream, &list->command, decoder) ) { return Inf_FALSE; }
-        }
-        /* process command with repetition */
-        switch (list->command) {
-            case InfCmd_CopyPreviousLength:
-                if ( !Inf_BS_ReadBits(bitstream,&value,2) ) { return Inf_FALSE; }
-                list->repetitions   = 3 + value;
-                break;
-            case InfCmd_RepeatZeroLength_3:
-                if ( !Inf_BS_ReadBits(bitstream,&value,3) ) { return Inf_FALSE; }
-                list->repetitions   = 3 + value;
-                list->huffmanLength = 0;
-                break;
-            case InfCmd_RepeatZeroLength_11:
-                if ( !Inf_BS_ReadBits(bitstream,&value,7) ) { return Inf_FALSE; }
-                list->repetitions   = 11 + value;
-                list->huffmanLength = 0;
-                break;
-            default: /* length is the value stored in 'list->command' */
-                list->repetitions   = 1;
-                list->huffmanLength = list->command;
-                break;
-        }
+        /* IMPORTANT: this loop even adds any repetition that is pending from a previous load, for example      */
+        /* some repetitions from the literal-decoder definition may end up in the `distance-decoder` definition */
         while (list->repetitions>0 && list->symbol<numberOfSymlens) {
             Inf_SLList_AddSymlen(list, list->symbol, list->huffmanLength);
             ++list->symbol; --list->repetitions;
         }
-        /* mark current command as finished */
-        list->command = InfCmd_ReadNext;
-        assert( list->repetitions==0 );
+        if (list->symbol<numberOfSymlens) {
+            assert( list->repetitions==0 );
+            
+            /* read a new command */
+            if ( !list->command ) {
+                if ( !Inf_BS_ReadEncodedBits(bitstream, &list->command, decoder) ) { return Inf_FALSE; }
+            }
+            /* use the command to configure the next repetition loop */
+            switch (list->command) {
+                case InfCmd_CopyPreviousLength:
+                    if ( !Inf_BS_ReadBits(bitstream,&value,2) ) { return Inf_FALSE; }
+                    list->repetitions   = 3 + value;
+                    break;
+                case InfCmd_RepeatZeroLength_3:
+                    if ( !Inf_BS_ReadBits(bitstream,&value,3) ) { return Inf_FALSE; }
+                    list->repetitions   = 3 + value;
+                    list->huffmanLength = 0;
+                    break;
+                case InfCmd_RepeatZeroLength_11:
+                    if ( !Inf_BS_ReadBits(bitstream,&value,7) ) { return Inf_FALSE; }
+                    list->repetitions   = 11 + value;
+                    list->huffmanLength = 0;
+                    break;
+                default: /* length is the value stored in 'list->command' */
+                    list->repetitions   = 1;
+                    list->huffmanLength = list->command;
+                    break;
+            }
+            /* mark current command as finished */
+            list->command = 0;
+        }
     }
     return Inf_TRUE;
 }
