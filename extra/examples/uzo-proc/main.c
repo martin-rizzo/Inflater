@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 #define INFLATER_IMPLEMENTATION
 #include "inflater.h"
@@ -137,6 +139,88 @@ FileHeader* allocFirstFileHeader(FILE* zipFile) {
     return fileHeader;
 }
 
+FileHeader* allocFirstFileHeaderGzip(FILE* zipFile) {
+    typedef struct {
+      uint8_t magic1;
+      uint8_t magic2;
+      uint8_t compressionMethod;
+      struct {
+        bool ftext : 1;
+        bool fhcrc : 1;
+        bool fextra : 1;
+        bool fname : 1;
+        bool fcomment : 1;
+      } flags;
+      uint32_t timestamp;
+      uint8_t compressionFlags;
+      uint8_t operatingSystemId;
+    } __attribute__((packed)) head_t;
+    head_t head = {0,};
+
+    assert( zipFile );
+     
+     // see rfc1952
+    fseek( zipFile, 0, SEEK_SET );
+    if ( fread( &head, sizeof(head), 1, zipFile )!=1 ) { return NULL; }
+    
+    if ( head.magic1 != 0x1f ) { return NULL; }
+    if ( head.magic2 != 0x8b ) { return NULL; }
+    
+    assert( !head.flags.ftext );
+    
+    if ( head.flags.fextra ) {
+      uint16_t len = 0;
+      if ( fread( &len, sizeof(len), 1, zipFile )!=1 ) { return NULL; }
+      printf( "head.flags.fextra.len = %d\n", len );
+      fseek( zipFile, len, SEEK_CUR );
+    }
+    
+    char *fileName = NULL;
+    if ( head.flags.fname ) {
+      char ch = EOF;
+      for (int i=0; ch; i++) {
+        ch = fgetc( zipFile );
+        assert( ch != EOF );
+        fileName = realloc( fileName, i+1 );
+        fileName[ i ] = ch;
+      }
+      printf("fname:%s\n", fileName);
+    }
+
+    char *fileComment = NULL;
+    if ( head.flags.fcomment ) {
+      char ch = EOF;
+      for (int i=0; ch; i++) {
+        ch = fgetc( zipFile );
+        assert( ch != EOF );
+        fileComment = realloc( fileComment, i+1 );
+        fileComment[ i ] = ch;
+      }
+      printf("fcomment:%s\n", fileComment);
+    }
+    
+    if ( head.flags.fhcrc ) {
+      uint16_t crc = 0;
+      if ( fread( &crc, sizeof(crc), 1, zipFile )!=1 ) { return NULL; }
+      printf( "head.flags.crc.len = %d\n", crc );
+    }
+
+    int fullPathLength = (fileName?strlen(fileName):0);
+    FileHeader* fileHeader = calloc(sizeof(FileHeader)+fullPathLength+1, 1);
+    assert( fileHeader );
+    fileHeader->contentPosition = ftell( zipFile );
+    fileHeader->compressionMethod = head.compressionMethod;
+    strcpy( fileHeader->fullPath, fileName );
+    fileHeader->name = fileHeader->fullPath;
+    for (char *ptr=fileHeader->fullPath; *ptr!='\0'; ++ptr) {
+        if (*ptr=='/' || *ptr=='\\') { fileHeader->name = (ptr+1); }
+    }
+
+    free( fileName );
+    free( fileComment );
+    return fileHeader;
+}
+
 /*=================================================================================================================*/
 #pragma mark - > DECOMPRESSING
 
@@ -181,6 +265,10 @@ void unzipFirstFile(const char* zipFilePath) {
     if (zipFile==NULL) { return; }
     
     fileHeader = allocFirstFileHeader(zipFile);
+    if ( !fileHeader) { 
+      fileHeader = allocFirstFileHeaderGzip(zipFile);
+    }
+    assert( fileHeader );
     if (fileHeader->compressionMethod==8) {
         printf("Inflating \"%s\"\n", fileHeader->name);
         inflateFile(zipFile, fileHeader->name, fileHeader->contentPosition);
